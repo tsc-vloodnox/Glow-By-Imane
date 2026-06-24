@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --background: #faf8f5;
+  --foreground: #3d3a36;
+  --color-sand: #f5f0ea;
+  --color-blush: #f9ece8;
+  --color-accent: #6b1f2a;
+  --color-muted: #7a736c;
+  --color-border: #e8e0d8;
+  --color-rose-soft: #c4637b;
+  --color-cream: #fbf7f4;
+  --color-warm: #d4bdb5;
+  --color-gold: #b8956a;
+  --color-whatsapp: #25d366;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-serif: var(--font-display);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+.font-serif {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+.product-card img {
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.product-card:hover img {
+  transform: scale(1.06);
+}
+
+.kit-badge {
+  background: linear-gradient(135deg, #b8956a 0%, #c4637b 100%);
+  color: #fff;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.cat-pill.active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.price-tag {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.price-old {
+  text-decoration: line-through;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.tab-bar {
+  box-shadow: 0 -2px 16px rgba(139, 26, 58, 0.07);
+}
+
+.whatsapp-btn {
+  box-shadow: 0 8px 24px rgba(37, 211, 102, 0.32);
+}
