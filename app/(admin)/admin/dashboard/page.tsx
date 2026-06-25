@@ -13,6 +13,8 @@ const statusLabels: Record<string, string> = {
   ANNULEE: "Annulée",
 };
 
+type RecentOrder = Awaited<ReturnType<typeof prisma.order.findMany>>[number];
+
 export default async function AdminDashboardPage() {
   const [orderCount, productCount, recentOrders] = await withDatabaseFallback(
     async () => {
@@ -28,7 +30,7 @@ export default async function AdminDashboardPage() {
 
       return [countOrders, countProducts, recent] as const;
     },
-    [0, 0, [] as Array<{ id: string; number: string; name: string; phone: string; status: string; createdAt: Date; items: Array<unknown> }>],
+    [0, 0, [] as RecentOrder[]],
   );
 
   return (

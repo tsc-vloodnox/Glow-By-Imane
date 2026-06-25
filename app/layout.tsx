@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Playfair_Display } from "next/font/google";
+import { Inter, Playfair_Display, Geist } from "next/font/google";
 
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const display = Playfair_Display({
   variable: "--font-display",
@@ -25,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr" className={`${display.variable} ${body.variable} h-full antialiased`}>
+    <html lang="fr" className={cn("h-full", "antialiased", display.variable, body.variable, "font-sans", geist.variable)}>
       <body className="min-h-full">{children}</body>
     </html>
   );

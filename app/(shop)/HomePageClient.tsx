@@ -1,19 +1,10 @@
+// Destination : app/(shop)/HomePageClient.tsx
 "use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
-const catalogPath = (imageName: string) => {
-  if (imageName.startsWith("/")) {
-    return imageName;
-  }
-
-  const encodedName = encodeURIComponent(imageName);
-  return supabaseUrl
-    ? `${supabaseUrl}/storage/v1/object/public/catalogue/${encodedName}`
-    : `/catalogue/${encodedName}`;
-};
+import { ProductImage } from "./components/ProductImage";
 
 type ProductWithCategory = {
   id: string;
@@ -42,28 +33,25 @@ type HomePageClientProps = {
 export default function HomePageClient({ products, categories, totalCount }: HomePageClientProps) {
   const [activeCategory, setActiveCategory] = useState("all");
 
+  // Remplace l'ancienne animation par manipulation DOM directe (querySelectorAll + setAttribute
+  // dans un setTimeout) par un état React simple. Plus robuste : pas de désynchronisation
+  // possible entre le DOM et le rendu React, et ça se redéclenche proprement au changement de filtre.
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRevealed(false);
+    const frame = requestAnimationFrame(() => setRevealed(true));
+    return () => cancelAnimationFrame(frame);
+  }, [activeCategory]);
+
   const visibleProducts = useMemo(
     () =>
       products.filter((product) =>
-        activeCategory === "all"
-          ? true
-          : product.category.id === activeCategory,
+        activeCategory === "all" ? true : product.category.id === activeCategory,
       ),
     [activeCategory, products],
   );
-
-  useEffect(() => {
-    const cards = Array.from(document.querySelectorAll(".fade-up"));
-    cards.forEach((card, index) => {
-      card.setAttribute("style", "opacity: 0; transform: translateY(16px);");
-      setTimeout(() => {
-        card.setAttribute(
-          "style",
-          "opacity: 1; transform: translateY(0); transition: all 0.5s cubic-bezier(0.16,1,0.3,1);",
-        );
-      }, 80 * index);
-    });
-  }, [visibleProducts.length]);
 
   return (
     <main className="pb-36 text-[var(--color-foreground)]">
@@ -130,48 +118,59 @@ export default function HomePageClient({ products, categories, totalCount }: Hom
           </span>
         </div>
 
-        <div id="product-grid" className="grid grid-cols-2 gap-3">
-          {visibleProducts.map((product) => (
-            <Link
-              key={product.id}
-              href={`/produits/${product.id}`}
-              className="product-card fade-up flex flex-col rounded-2xl border border-[var(--color-border)] bg-white overflow-hidden"
-              style={{ boxShadow: "0 4px 20px rgba(139,26,58,0.05)" }}
-            >
-              <div className="relative aspect-[4/5] bg-[var(--color-sand)] overflow-hidden flex items-center justify-center">
-                {product.images.length > 0 ? (
-                  <img
-                    src={catalogPath(product.images[0])}
-                    alt={product.name}
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span className="font-serif text-[var(--color-warm)] text-5xl">✦</span>
-                )}
-              </div>
-              <div className="p-3 flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-wider text-[var(--color-gold)]">
-                  {product.category.name}
-                </span>
-                <h3 className="text-sm font-semibold text-[var(--color-foreground)] leading-snug">
-                  {product.name}
-                </h3>
-                <p className="text-[11px] text-[var(--color-muted)] leading-snug">
-                  {product.description}
-                </p>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-[var(--color-accent)]">
-                    {product.price.toLocaleString("fr-GN")} GNF
-                  </span>
-                  <span className="text-[10px] text-[var(--color-muted)]">
-                    {product.stock > 0 ? "En stock" : "Rupture"}
-                  </span>
-                </div>
-              </div>
+        {visibleProducts.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--color-border)] p-8 text-center text-sm text-[var(--color-muted)]">
+            Aucun produit favori dans cette catégorie pour le moment.
+            <br />
+            <Link href="/produits" className="mt-2 inline-block underline underline-offset-2 text-[var(--color-accent)]">
+              Voir tout le catalogue
             </Link>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div id="product-grid" className="grid grid-cols-2 gap-3">
+            {visibleProducts.map((product, index) => (
+              <Link
+                key={product.id}
+                href={`/produits/${product.id}`}
+                className="product-card flex flex-col rounded-2xl border border-[var(--color-border)] bg-white overflow-hidden"
+                style={{
+                  boxShadow: "0 4px 20px rgba(139,26,58,0.05)",
+                  opacity: revealed ? 1 : 0,
+                  transform: revealed ? "translateY(0)" : "translateY(16px)",
+                  transition: `opacity 0.5s cubic-bezier(0.16,1,0.3,1) ${index * 60}ms, transform 0.5s cubic-bezier(0.16,1,0.3,1) ${index * 60}ms`,
+                }}
+              >
+                <div className="relative aspect-[4/5] overflow-hidden">
+                  <ProductImage
+                    imageName={product.images[0]}
+                    alt={product.name}
+                    className="h-full w-full"
+                  />
+                </div>
+                <div className="p-3 flex flex-col gap-1">
+                  <span className="text-[10px] uppercase tracking-wider text-[var(--color-gold)]">
+                    {product.category.name}
+                  </span>
+                  <h3 className="text-sm font-semibold text-[var(--color-foreground)] leading-snug">
+                    {product.name}
+                  </h3>
+                  <p className="text-[11px] text-[var(--color-muted)] leading-snug">
+                    {product.description}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-[var(--color-accent)]">
+                      {product.price.toLocaleString("fr-GN")} GNF
+                    </span>
+                    <span className="text-[10px] text-[var(--color-muted)]">
+                      {product.stock > 0 ? "En stock" : "Rupture"}
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+
         {typeof totalCount === "number" && totalCount > products.length ? (
           <div className="px-4 mt-4 flex justify-center">
             <Link
@@ -198,7 +197,6 @@ export default function HomePageClient({ products, categories, totalCount }: Hom
           <span className="text-[14px] font-semibold text-[var(--color-accent)]">100% Satisfait</span>
         </div>
       </section>
-
     </main>
   );
 }

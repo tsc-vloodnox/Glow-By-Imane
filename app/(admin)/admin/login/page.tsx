@@ -1,52 +1,69 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+/**
+ * app/admin/login/page.tsx
+ *
+ * Page de connexion — utilise la Server Action loginAction.
+ * Plus de cookie posé côté client, plus de mot de passe dans le navigateur.
+ */
 
-import { ADMIN_COOKIE_NAME, buildAdminCookieValue } from "@/lib/admin-auth";
+import { useSearchParams } from "next/navigation";
+import { useActionState } from "react";
+
+import { loginAction } from "./actions";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") ?? "/admin/dashboard";
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const formData = new FormData(event.currentTarget);
-    const phone = String(formData.get("phone") || "").trim();
-    const password = String(formData.get("password") || "").trim();
-
-    if (!phone || !password) {
-      setError("Veuillez saisir votre numéro et votre mot de passe.");
-      return;
-    }
-
-    document.cookie = `${ADMIN_COOKIE_NAME}=${buildAdminCookieValue(phone, password)}; path=/; max-age=3600; SameSite=Lax`;
-    router.refresh();
-    router.push("/admin/dashboard");
-  }
-
+  const [state, formAction, isPending] = useActionState(loginAction, null);
+ 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-sand)] px-4">
       <div className="w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-white p-6 shadow-sm">
         <h1 className="font-serif text-2xl text-[var(--color-accent)]">Connexion admin</h1>
-        <p className="mt-2 text-sm text-[var(--color-muted)]">Accès réservé au personnel Glow by Imane.</p>
+        <p className="mt-2 text-sm text-[var(--color-muted)]">
+          Accès réservé au personnel Glow by Imane.
+        </p>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <form action={formAction} className="mt-6 space-y-4">
+          {/* Transmet le paramètre "next" au server action */}
+          <input type="hidden" name="next" value={next} />
+
           <label className="block space-y-1">
             <span className="text-sm font-medium">Numéro</span>
-            <input name="phone" className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="620000000" />
+            <input
+              name="phone"
+              type="tel"
+              required
+              autoComplete="username"
+              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+              placeholder="620000000"
+            />
           </label>
 
           <label className="block space-y-1">
             <span className="text-sm font-medium">Mot de passe</span>
-            <input name="password" type="password" className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="••••••••" />
+            <input
+              name="password"
+              type="password"
+              required
+              autoComplete="current-password"
+              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+              placeholder="••••••••"
+            />
           </label>
 
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {state?.error ? (
+            <p className="text-sm text-red-600">{state.error}</p>
+          ) : null}
 
-          <button type="submit" className="w-full rounded-full bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white">
-            Se connecter
+          <button
+            type="submit"
+            disabled={isPending}
+            className="w-full rounded-full bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {isPending ? "Connexion…" : "Se connecter"}
           </button>
         </form>
       </div>

@@ -1,15 +1,69 @@
+// Destination : app/(shop)/commande/CheckoutPageClient.tsx
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { createOrder } from "../actions";
-import { clearCart, getStoredCartItems, type CartItem } from "@/lib/cart";
+import { createOrder, refreshCartPrices } from "../actions";
+import { clearCart, getStoredCartItems, setStoredCartItems, type CartItem } from "@/lib/cart";
+
+// Numéros guinéens : 9 chiffres commençant par 6, avec ou sans indicatif +224
+const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
 
 export default function CheckoutPageClient() {
   const [items, setItems] = useState<CartItem[]>(() => getStoredCartItems());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(() => getStoredCartItems().length > 0);
   const [message, setMessage] = useState<string | null>(null);
+  const [priceNotice, setPriceNotice] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  // Revalide les prix côté serveur dès l'arrivée sur le checkout, pour que
+  // le total affiché ici corresponde exactement à ce qui sera facturé
+  // (avant : le prix restait figé au moment de l'ajout au panier).
+  useEffect(() => {
+    const storedItems = getStoredCartItems();
+
+    if (storedItems.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsRefreshing(false);
+      return;
+    }
+
+    refreshCartPrices(
+      storedItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price,
+      })),
+    )
+      .then((result) => {
+        const updatedCartItems: CartItem[] = result.items.map((item) => ({
+          productId: item.productId,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+        }));
+
+        setItems(updatedCartItems);
+        setStoredCartItems(updatedCartItems);
+
+        if (result.priceChanged) {
+          setPriceNotice("Certains prix ont été mis à jour depuis l'ajout au panier. Le total ci-dessous est à jour.");
+        }
+        if (result.removedProductIds.length > 0) {
+          setPriceNotice((prev) =>
+            [prev, "Un ou plusieurs articles ne sont plus disponibles et ont été retirés."]
+              .filter(Boolean)
+              .join(" "),
+          );
+        }
+      })
+      .catch(() => {
+        // En cas d'échec réseau, on garde les valeurs locales plutôt que de bloquer la page
+      })
+      .finally(() => setIsRefreshing(false));
+  }, []);
 
   const total = useMemo(
     () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
@@ -25,9 +79,17 @@ export default function CheckoutPageClient() {
     }
 
     const formData = new FormData(event.currentTarget);
+    const phone = String(formData.get("phone") || "").trim();
+
+    if (!PHONE_PATTERN.test(phone.replace(/\s/g, ""))) {
+      setPhoneError("Format attendu : 6XX XX XX XX (numéro guinéen).");
+      return;
+    }
+    setPhoneError(null);
+
     const payload = {
       name: String(formData.get("name") || "").trim(),
-      phone: String(formData.get("phone") || "").trim(),
+      phone,
       quartier: String(formData.get("quartier") || "").trim(),
       comment: String(formData.get("comment") || "").trim() || undefined,
       items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
@@ -54,6 +116,10 @@ export default function CheckoutPageClient() {
         Remplissez vos informations. Une fois le formulaire envoyé, vous serez redirigé vers WhatsApp pour confirmer avec Imane.
       </p>
 
+      {priceNotice ? (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{priceNotice}</p>
+      ) : null}
+
       {message ? <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{message}</p> : null}
 
       <div className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
@@ -68,7 +134,7 @@ export default function CheckoutPageClient() {
         </div>
         <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm font-semibold text-[var(--color-accent)]">
           <span>Total</span>
-          <span>{total.toLocaleString("fr-GN")} GNF</span>
+          <span>{isRefreshing ? "..." : `${total.toLocaleString("fr-GN")} GNF`}</span>
         </div>
       </div>
 
@@ -89,9 +155,14 @@ export default function CheckoutPageClient() {
             name="phone"
             required
             type="tel"
-            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+            inputMode="numeric"
+            onChange={() => setPhoneError(null)}
+            className={`w-full rounded-xl border px-4 py-3 ${
+              phoneError ? "border-red-300" : "border-[var(--color-border)]"
+            }`}
             placeholder="6XX XX XX XX"
           />
+          {phoneError ? <span className="text-xs text-red-600">{phoneError}</span> : null}
         </label>
 
         <label className="block space-y-1">
@@ -114,9 +185,13 @@ export default function CheckoutPageClient() {
           />
         </label>
 
+        <p className="rounded-xl bg-[var(--color-blush)]/60 px-4 py-3 text-xs text-[var(--color-muted)]">
+          Vous ne payez rien maintenant. Imane vous contactera sur WhatsApp pour confirmer la disponibilité et les frais de livraison.
+        </p>
+
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || isRefreshing}
           className="w-full rounded-full bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
         >
           {isSubmitting ? "Envoi en cours..." : "Envoyer sur WhatsApp"}

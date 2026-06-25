@@ -1,7 +1,7 @@
 import HomePageClient from "./HomePageClient";
 import { prisma } from "@/lib/prisma";
 
-const MAX_HOME_PRODUCTS = 8;
+const MAX_HOME_PRODUCTS = 10;
 
 export default async function HomePage() {
   const categories = await prisma.category.findMany({

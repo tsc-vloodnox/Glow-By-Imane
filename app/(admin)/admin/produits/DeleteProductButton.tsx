@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { deleteProduct } from "./actions";
+import { deleteProduct } from "../actions";
 
 type DeleteProductButtonProps = {
   productId: string;

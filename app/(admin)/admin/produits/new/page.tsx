@@ -3,7 +3,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { withDatabaseFallback } from "@/lib/db";
 import { ProductForm } from "../ProductForm";
-import { requireAdmin } from "../actions";
+import { requireAdmin } from "../../actions";
+
+const STORAGE_BASE_URL = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_URL ?? "";
 
 export default async function NewProductPage() {
   await requireAdmin();
@@ -23,7 +25,7 @@ export default async function NewProductPage() {
         <Link href="/admin/produits" className="text-sm text-[var(--color-accent)]">Retour</Link>
       </div>
 
-      <ProductForm categories={categories} />
+      <ProductForm categories={categories} storageBaseUrl={STORAGE_BASE_URL} />
     </div>
   );
 }

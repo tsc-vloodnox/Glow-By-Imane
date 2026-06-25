@@ -3,7 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { withDatabaseFallback } from "@/lib/db";
 import { ProductForm } from "../../ProductForm";
-import { requireAdmin } from "../../actions";
+import { requireAdmin } from "../../../actions";
 
 export default async function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAdmin();

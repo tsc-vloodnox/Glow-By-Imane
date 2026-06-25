@@ -18,6 +18,14 @@ enum OrderStatus {
   ANNULEE
 }
 
+enum DeliveryStatus {
+  PLANIFIEE
+  EN_COURS
+  LIVREE
+  ECHOUEE
+  REPORTEE
+}
+
 model Category {
   id       String    @id @default(cuid())
   name     String
@@ -31,6 +39,7 @@ model Product {
   price       Int
   stock       Int         @default(0)
   favorite    Boolean     @default(false)
+  archived    Boolean     @default(false)
   images      String[]
   categoryId  String
   category    Category    @relation(fields: [categoryId], references: [id])
@@ -61,6 +70,7 @@ model Order {
   comment        String?
   estimatedTotal Int
   items          OrderItem[]
+  delivery       Delivery?
   createdAt      DateTime    @default(now())
 }
 
@@ -80,4 +90,17 @@ model PushSubscription {
   p256dh    String
   auth      String
   createdAt DateTime @default(now())
+}
+
+model Delivery {
+  id              String         @id @default(cuid())
+  orderId         String         @unique
+  order           Order          @relation(fields: [orderId], references: [id])
+  status          DeliveryStatus @default(PLANIFIEE)
+  scheduledAt     DateTime
+  deliveredAt     DateTime?
+  livreur         String?        // texte libre pour commencer
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }

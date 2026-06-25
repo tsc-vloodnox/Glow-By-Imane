@@ -1,3 +1,5 @@
+// Destination : lib/cart.ts
+
 export type CartItem = {
   productId: string;
   name: string;
@@ -40,29 +42,44 @@ export function setStoredCartItems(items: CartItem[]) {
   emitCartUpdated();
 }
 
-export function addToCart(product: { id: string; name: string; price: number }, quantity = 1) {
+/**
+ * @param maxQuantity Optionnel — borne la quantité finale (ex: stock connu côté UI).
+ *   Si non fourni, aucune limite n'est appliquée ici (le serveur reste le garant final).
+ */
+export function addToCart(
+  product: { id: string; name: string; price: number },
+  quantity = 1,
+  maxQuantity?: number,
+) {
   const items = getStoredCartItems();
   const existing = items.find((item) => item.productId === product.id);
 
-  if (existing) {
-    existing.quantity += quantity;
-  } else {
-    items.push({
-      productId: product.id,
-      name: product.name,
-      price: product.price,
-      quantity,
-    });
-  }
+  const nextItems = existing
+    ? items.map((item) =>
+        item.productId === product.id
+          ? { ...item, quantity: clamp(item.quantity + quantity, maxQuantity) }
+          : item,
+      )
+    : [
+        ...items,
+        {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          quantity: clamp(quantity, maxQuantity),
+        },
+      ];
 
-  setStoredCartItems(items);
-  return items;
+  setStoredCartItems(nextItems);
+  return nextItems;
 }
 
-export function updateCartQuantity(productId: string, quantity: number) {
+export function updateCartQuantity(productId: string, quantity: number, maxQuantity?: number) {
   const items = getStoredCartItems();
   const nextItems = items
-    .map((item) => (item.productId === productId ? { ...item, quantity } : item))
+    .map((item) =>
+      item.productId === productId ? { ...item, quantity: clamp(quantity, maxQuantity) } : item,
+    )
     .filter((item) => item.quantity > 0);
 
   setStoredCartItems(nextItems);
@@ -81,4 +98,11 @@ export function clearCart() {
 
 export function getCartCount() {
   return getStoredCartItems().reduce((sum, item) => sum + item.quantity, 0);
+}
+
+function clamp(quantity: number, max?: number) {
+  if (typeof max === "number") {
+    return Math.min(Math.max(quantity, 0), max);
+  }
+  return Math.max(quantity, 0);
 }
