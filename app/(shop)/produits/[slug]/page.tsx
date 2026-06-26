@@ -29,7 +29,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
       : `/catalogue/${encodedName}`;
   };
 
-  const galleryImages = product.images.length > 0 ? product.images.slice(0, 3) : ["/catalogue/placeholder.png"];
+  const galleryImages = product.images.length > 0 ? product.images : ["/catalogue/placeholder.png"];
   const formattedPrice = `${product.price.toLocaleString("fr-GN")} GNF`;
 
   return (
