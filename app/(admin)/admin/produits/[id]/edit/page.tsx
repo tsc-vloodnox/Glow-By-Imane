@@ -47,8 +47,7 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
           favorite: product.favorite,
           images: product.images,
           categoryId: product.categoryId,
-        }}
-      />
+        }} storageBaseUrl={""}      />
     </div>
   );
 }
