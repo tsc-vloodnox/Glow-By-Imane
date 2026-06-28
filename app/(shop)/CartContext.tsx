@@ -17,8 +17,8 @@ type CartContextValue = {
   items: CartItem[];
   count: number;
   total: number;
-  addItem: (product: { id: string; name: string; price: number }, quantity?: number, maxQuantity?: number) => void;
-  updateQuantity: (productId: string, quantity: number, maxQuantity?: number) => void;
+  addItem: (product: { id: string; name: string; price: number }, quantity?: number, stock?: number) => void;
+  updateQuantity: (productId: string, quantity: number) => void;
   removeItem: (productId: string) => void;
   clear: () => void;
   replaceAll: (items: CartItem[]) => void;
@@ -31,6 +31,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   // Hydratation après montage (localStorage n'existe pas côté serveur)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems(getStoredCartItems());
   }, []);
 
@@ -46,12 +47,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const addItem = useCallback<CartContextValue["addItem"]>((product, quantity = 1, maxQuantity) => {
-    setItems(addToCartStorage(product, quantity, maxQuantity));
+  const addItem = useCallback<CartContextValue["addItem"]>((product, quantity = 1, stock) => {
+    setItems(addToCartStorage(product, quantity, stock));
   }, []);
 
-  const updateQuantity = useCallback<CartContextValue["updateQuantity"]>((productId, quantity, maxQuantity) => {
-    setItems(updateCartQuantityStorage(productId, quantity, maxQuantity));
+  const updateQuantity = useCallback<CartContextValue["updateQuantity"]>((productId, quantity) => {
+    setItems(updateCartQuantityStorage(productId, quantity));
   }, []);
 
   const removeItem = useCallback((productId: string) => {

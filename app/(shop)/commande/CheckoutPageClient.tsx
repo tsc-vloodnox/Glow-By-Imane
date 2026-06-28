@@ -41,6 +41,7 @@ export default function CheckoutPageClient() {
           name: item.name,
           price: item.price,
           quantity: item.quantity,
+          stock: item.stock,
         }));
 
         replaceAll(updatedCartItems);

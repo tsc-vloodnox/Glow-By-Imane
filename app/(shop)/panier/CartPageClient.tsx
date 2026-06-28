@@ -33,45 +33,59 @@ export default function CartPageClient() {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => (
-            <div key={item.productId} className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-[var(--color-foreground)]">{item.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--color-accent)]">
-                    {(item.price * item.quantity).toLocaleString("fr-GN")} GNF
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.productId)}
-                  className="text-xs text-[var(--color-muted)]"
-                >
-                  Retirer
-                </button>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between">
-                <label className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted)]">
-                  Quantité
-                  <select
-                    value={item.quantity}
-                    onChange={(event) => updateQuantity(item.productId, Number(event.target.value))}
-                    className="ml-2 rounded-lg border border-[var(--color-border)] px-2 py-1 text-sm"
+          {items.map((item) => {
+            const atMax = item.quantity >= item.stock;
+            return (
+              <div key={item.productId} className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--color-foreground)]">{item.name}</h2>
+                    <p className="mt-1 text-sm text-[var(--color-accent)]">
+                      {(item.price * item.quantity).toLocaleString("fr-GN")} GNF
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.productId)}
+                    className="text-xs text-[var(--color-muted)]"
                   >
-                    {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="text-sm text-[var(--color-muted)]">
-                  {item.price.toLocaleString("fr-GN")} GNF / unité
-                </span>
+                    Retirer
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3 rounded-full border border-[var(--color-border)] px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                      disabled={item.quantity <= 1}
+                      aria-label="Diminuer la quantité"
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-base text-[var(--color-accent)] disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                    <button
+                      type="button"
+                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                      disabled={atMax}
+                      aria-label="Augmenter la quantité"
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-base text-[var(--color-accent)] disabled:opacity-30"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <span className="text-sm text-[var(--color-muted)]">
+                    {item.price.toLocaleString("fr-GN")} GNF / unité
+                  </span>
+                </div>
+
+                {atMax ? (
+                  <p className="mt-2 text-[11px] text-amber-600">Quantité maximale disponible atteinte.</p>
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

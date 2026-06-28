@@ -5,9 +5,11 @@ export type CartItem = {
   name: string;
   price: number;
   quantity: number;
+  stock: number; // stock connu au moment de l'ajout, sert de borne dans l'UI panier
 };
 
 const CART_STORAGE_KEY = "glow-cart-items";
+const FALLBACK_STOCK = 99; // si jamais un item plus ancien n'a pas de stock stocké
 
 export function getStoredCartItems(): CartItem[] {
   if (typeof window === "undefined") {
@@ -20,8 +22,19 @@ export function getStoredCartItems(): CartItem[] {
       return [];
     }
 
-    const parsed = JSON.parse(raw) as CartItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as Partial<CartItem>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    // Compatibilité avec d'anciens paniers stockés avant l'ajout du champ `stock`
+    return parsed.map((item) => ({
+      productId: item.productId ?? "",
+      name: item.name ?? "",
+      price: item.price ?? 0,
+      quantity: item.quantity ?? 1,
+      stock: typeof item.stock === "number" ? item.stock : FALLBACK_STOCK,
+    }));
   } catch {
     return [];
   }
@@ -43,13 +56,14 @@ export function setStoredCartItems(items: CartItem[]) {
 }
 
 /**
- * @param maxQuantity Optionnel — borne la quantité finale (ex: stock connu côté UI).
- *   Si non fourni, aucune limite n'est appliquée ici (le serveur reste le garant final).
+ * @param stock Stock connu au moment de l'ajout (ex: depuis la fiche produit).
+ *   Stocké sur l'item pour pouvoir borner la quantité directement dans le panier,
+ *   sans dépendre d'un appel serveur à chaque changement.
  */
 export function addToCart(
   product: { id: string; name: string; price: number },
   quantity = 1,
-  maxQuantity?: number,
+  stock: number = FALLBACK_STOCK,
 ) {
   const items = getStoredCartItems();
   const existing = items.find((item) => item.productId === product.id);
@@ -57,7 +71,7 @@ export function addToCart(
   const nextItems = existing
     ? items.map((item) =>
         item.productId === product.id
-          ? { ...item, quantity: clamp(item.quantity + quantity, maxQuantity) }
+          ? { ...item, stock, quantity: clamp(item.quantity + quantity, stock) }
           : item,
       )
     : [
@@ -66,7 +80,8 @@ export function addToCart(
           productId: product.id,
           name: product.name,
           price: product.price,
-          quantity: clamp(quantity, maxQuantity),
+          quantity: clamp(quantity, stock),
+          stock,
         },
       ];
 
@@ -74,11 +89,15 @@ export function addToCart(
   return nextItems;
 }
 
-export function updateCartQuantity(productId: string, quantity: number, maxQuantity?: number) {
+/**
+ * Borne automatiquement à `item.stock` (plus besoin de le repasser à chaque appel
+ * depuis l'UI — la quantité ne peut jamais dépasser ce qui est connu en stock).
+ */
+export function updateCartQuantity(productId: string, quantity: number) {
   const items = getStoredCartItems();
   const nextItems = items
     .map((item) =>
-      item.productId === productId ? { ...item, quantity: clamp(quantity, maxQuantity) } : item,
+      item.productId === productId ? { ...item, quantity: clamp(quantity, item.stock) } : item,
     )
     .filter((item) => item.quantity > 0);
 
@@ -100,9 +119,6 @@ export function getCartCount() {
   return getStoredCartItems().reduce((sum, item) => sum + item.quantity, 0);
 }
 
-function clamp(quantity: number, max?: number) {
-  if (typeof max === "number") {
-    return Math.min(Math.max(quantity, 0), max);
-  }
-  return Math.max(quantity, 0);
+function clamp(quantity: number, max: number) {
+  return Math.min(Math.max(quantity, 0), max);
 }
