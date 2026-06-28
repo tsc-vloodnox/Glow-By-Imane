@@ -49,8 +49,8 @@ model Product {
 
 model Customer {
   id         String   @id @default(cuid())
-  name       String
   phone      String   @unique
+  name       String
   quartier   String
   loyaltyPts Int      @default(0)
   vip        Boolean  @default(false)
@@ -62,6 +62,7 @@ model Order {
   id             String      @id @default(cuid())
   number         Int         @unique @default(autoincrement())
   status         OrderStatus @default(NOUVELLE)
+  source         String      @default("app")
   customerId     String?
   customer       Customer?   @relation(fields: [customerId], references: [id])
   name           String
@@ -69,6 +70,9 @@ model Order {
   quartier       String
   comment        String?
   estimatedTotal Int
+  discountAmount Int         @default(0)
+  discountReason String?
+  finalTotal     Int         @default(0)
   items          OrderItem[]
   delivery       Delivery?
   createdAt      DateTime    @default(now())
@@ -93,14 +97,15 @@ model PushSubscription {
 }
 
 model Delivery {
-  id              String         @id @default(cuid())
-  orderId         String         @unique
-  order           Order          @relation(fields: [orderId], references: [id])
-  status          DeliveryStatus @default(PLANIFIEE)
-  scheduledAt     DateTime
-  deliveredAt     DateTime?
-  livreur         String?        // texte libre pour commencer
-  notes           String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id          String         @id @default(cuid())
+  orderId     String         @unique
+  order       Order          @relation(fields: [orderId], references: [id])
+  status      DeliveryStatus @default(PLANIFIEE)
+  scheduledAt DateTime
+  deliveredAt DateTime?
+  livreur     String?
+  deliveryFee Int            @default(0)
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 }

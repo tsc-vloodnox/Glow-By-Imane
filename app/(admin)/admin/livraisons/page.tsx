@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
 import { DELIVERY_STATUS_CONFIG, type DeliveryStatus } from "@/lib/order-status";
 import { LivraisonStatusButton } from "./LivraisonStatusButton";
+import { QuartierCopyButton } from "./QuartierCopyButton";
 import Link from "next/link";
 
 // Retourne les 7 prochains jours avec livraisons (+ aujourd'hui)
@@ -136,9 +137,24 @@ export default async function AdminLivraisonsPage() {
                         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
                           📍 {quartier}
                         </span>
-                        <span className="text-xs text-[var(--color-muted)]">
-                          {items.length} arrêt{items.length > 1 ? "s" : ""}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-[var(--color-muted)]">
+                            {items.length} arrêt{items.length > 1 ? "s" : ""}
+                          </span>
+                          <QuartierCopyButton
+                            quartier={quartier}
+                            date={dayLabel}
+                            deliveries={items.map((d) => ({
+                              orderNumber: d.order.number,
+                              orderName: d.order.name,
+                              orderPhone: d.order.phone,
+                              scheduledAt: d.scheduledAt,
+                              finalTotal: d.order.estimatedTotal,
+                              deliveryFee: 0,
+                              notes: d.notes,
+                            }))}
+                          />
+                        </div>
                       </div>
 
                       {/* Livraisons du quartier */}

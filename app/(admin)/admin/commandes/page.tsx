@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
 import { requireAdmin } from "../actions";
+import { BulkDeleteOrders } from "./BulkDeleteOrders";
 
 // Statuts affichés dans les onglets de filtre (dans l'ordre du workflow)
 const FILTER_STATUSES: Array<OrderStatus | "TOUTES"> = [
@@ -47,11 +48,22 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Commandes</h1>
-        <p className="text-sm text-[var(--color-muted)]">
-          {totalCount} commande{totalCount > 1 ? "s" : ""} au total
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Commandes</h1>
+          <p className="text-sm text-[var(--color-muted)]">
+            {totalCount} commande{totalCount > 1 ? "s" : ""} au total
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <BulkDeleteOrders />
+          <Link
+            href="/admin/commandes/new"
+            className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+          >
+            + Nouvelle
+          </Link>
+        </div>
       </div>
 
       {/* Filtres statut — scroll horizontal sur mobile */}

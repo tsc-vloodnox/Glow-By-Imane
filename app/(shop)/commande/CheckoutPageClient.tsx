@@ -2,18 +2,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { createOrder, refreshCartPrices } from "../actions";
-import { clearCart, getStoredCartItems, setStoredCartItems, type CartItem } from "@/lib/cart";
+import { useCart } from "../CartContext";
 
 // Numéros guinéens : 9 chiffres commençant par 6, avec ou sans indicatif +224
 const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
 
 export default function CheckoutPageClient() {
-  const [items, setItems] = useState<CartItem[]>(() => getStoredCartItems());
+  const { items, total, clear, replaceAll } = useCart();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(() => getStoredCartItems().length > 0);
+  const [isRefreshing, setIsRefreshing] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [priceNotice, setPriceNotice] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -22,31 +22,28 @@ export default function CheckoutPageClient() {
   // le total affiché ici corresponde exactement à ce qui sera facturé
   // (avant : le prix restait figé au moment de l'ajout au panier).
   useEffect(() => {
-    const storedItems = getStoredCartItems();
-
-    if (storedItems.length === 0) {
+    if (items.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsRefreshing(false);
       return;
     }
 
     refreshCartPrices(
-      storedItems.map((item) => ({
+      items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
         price: item.price,
       })),
     )
       .then((result) => {
-        const updatedCartItems: CartItem[] = result.items.map((item) => ({
+        const updatedCartItems = result.items.map((item) => ({
           productId: item.productId,
           name: item.name,
           price: item.price,
           quantity: item.quantity,
         }));
 
-        setItems(updatedCartItems);
-        setStoredCartItems(updatedCartItems);
+        replaceAll(updatedCartItems);
 
         if (result.priceChanged) {
           setPriceNotice("Certains prix ont été mis à jour depuis l'ajout au panier. Le total ci-dessous est à jour.");
@@ -63,12 +60,9 @@ export default function CheckoutPageClient() {
         // En cas d'échec réseau, on garde les valeurs locales plutôt que de bloquer la page
       })
       .finally(() => setIsRefreshing(false));
+    // On ne veut revalider qu'une fois à l'arrivée sur la page, pas à chaque changement d'items
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const total = useMemo(
-    () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
-    [items],
-  );
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -100,7 +94,7 @@ export default function CheckoutPageClient() {
 
     try {
       const redirectUrl = await createOrder(payload);
-      clearCart();
+      clear();
       window.location.href = redirectUrl;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Une erreur est survenue.");

@@ -1,21 +1,12 @@
+// Destination : app/(shop)/panier/CartPageClient.tsx
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
 
-import { clearCart, getStoredCartItems, removeFromCart, updateCartQuantity, type CartItem } from "@/lib/cart";
+import { useCart } from "../CartContext";
 
 export default function CartPageClient() {
-  const [items, setItems] = useState<CartItem[]>(() => getStoredCartItems());
-
-  const total = useMemo(
-    () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
-    [items],
-  );
-
-  const refreshItems = () => {
-    setItems(getStoredCartItems());
-  };
+  const { items, total, updateQuantity, removeItem, clear } = useCart();
 
   return (
     <div className="space-y-6">
@@ -25,8 +16,9 @@ export default function CartPageClient() {
           <button
             type="button"
             onClick={() => {
-              clearCart();
-              refreshItems();
+              if (window.confirm("Vider tout le panier ?")) {
+                clear();
+              }
             }}
             className="text-sm text-[var(--color-muted)]"
           >
@@ -52,10 +44,7 @@ export default function CartPageClient() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    removeFromCart(item.productId);
-                    refreshItems();
-                  }}
+                  onClick={() => removeItem(item.productId)}
                   className="text-xs text-[var(--color-muted)]"
                 >
                   Retirer
@@ -67,10 +56,7 @@ export default function CartPageClient() {
                   Quantité
                   <select
                     value={item.quantity}
-                    onChange={(event) => {
-                      updateCartQuantity(item.productId, Number(event.target.value));
-                      refreshItems();
-                    }}
+                    onChange={(event) => updateQuantity(item.productId, Number(event.target.value))}
                     className="ml-2 rounded-lg border border-[var(--color-border)] px-2 py-1 text-sm"
                   >
                     {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
@@ -92,9 +78,7 @@ export default function CartPageClient() {
       <div className="rounded-2xl bg-[var(--color-blush)] p-4 text-sm text-[var(--color-muted)]">
         <div className="flex items-center justify-between">
           <span>Total estimé</span>
-          <span className="font-semibold text-[var(--color-accent)]">
-            {total.toLocaleString("fr-GN")} GNF
-          </span>
+          <span className="font-semibold text-[var(--color-accent)]">{total.toLocaleString("fr-GN")} GNF</span>
         </div>
         <p className="mt-2">Les frais de livraison seront confirmés par WhatsApp.</p>
       </div>

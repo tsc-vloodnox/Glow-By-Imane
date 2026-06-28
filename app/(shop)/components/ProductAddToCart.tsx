@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 
-import { addToCart } from "@/lib/cart";
+import { useCart } from "../CartContext";
 
 type ProductAddToCartProps = {
   product: { id: string; name: string; price: number };
@@ -11,6 +11,7 @@ type ProductAddToCartProps = {
 };
 
 export function ProductAddToCart({ product, stock }: ProductAddToCartProps) {
+  const { addItem } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
   const isOutOfStock = stock <= 0;
@@ -20,7 +21,7 @@ export function ProductAddToCart({ product, stock }: ProductAddToCartProps) {
 
   const handleAdd = () => {
     if (isOutOfStock) return;
-    addToCart(product, quantity, stock);
+    addItem(product, quantity, stock);
     setIsAdded(true);
     setTimeout(() => setIsAdded(false), 2000);
   };
