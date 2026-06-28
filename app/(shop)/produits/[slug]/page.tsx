@@ -104,7 +104,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               className="flex min-h-[56px] w-full items-center justify-center rounded-2xl bg-[var(--color-accent)] px-6 py-3 text-center text-sm font-medium text-white shadow-[0_10px_28px_rgba(107,31,42,0.2)] transition hover:opacity-95"
             />
             <Link
-              href="/produits"
+              href="/"
               className="flex h-[52px] items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-accent)]"
             >
               Voir d&apos;autres produits

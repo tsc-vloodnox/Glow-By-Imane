@@ -11,6 +11,7 @@ type DeliveryData = {
   scheduledAt: Date;
   deliveredAt: Date | null;
   livreur: string | null;
+  deliveryFee: number;
   notes: string | null;
 } | null;
 
@@ -20,7 +21,7 @@ type Props = {
   orderName: string;
   orderPhone: string;
   orderQuartier: string;
-  orderTotal: number;
+  orderFinalTotal: number;
   delivery: DeliveryData;
 };
 
@@ -30,7 +31,7 @@ export function DeliveryPanel({
   orderName,
   orderPhone,
   orderQuartier,
-  orderTotal,
+  orderFinalTotal,
   delivery,
 }: Props) {
   const [isPending, startTransition] = useTransition();
@@ -38,7 +39,6 @@ export function DeliveryPanel({
   const [error, setError] = useState<string | null>(null);
   const [localDelivery, setLocalDelivery] = useState(delivery);
 
-  // ── Génération message WhatsApp ─────────────────────────────────────────
   function buildWhatsAppMessage(scheduledDate: string) {
     const date = new Date(scheduledDate);
     const formatted = date.toLocaleDateString("fr-FR", {
@@ -46,30 +46,34 @@ export function DeliveryPanel({
       day: "numeric",
       month: "long",
     });
+    const fee = localDelivery?.deliveryFee ?? 0;
+    const total = orderFinalTotal + fee;
     return encodeURIComponent(
-      `Bonjour ${orderName} 👋\n\nVotre commande Glow by Imane #${orderNumber} (${orderTotal.toLocaleString("fr-GN")} GNF) sera livrée le *${formatted}* à ${orderQuartier}.\n\nNous vous contacterons à votre arrivée. Merci de votre confiance ! 🌸`,
+      `Bonjour ${orderName} 👋\n\nVotre commande Glow by Imane #${orderNumber} sera livrée le *${formatted}* à ${orderQuartier}.\n\n` +
+      `Total commande : ${orderFinalTotal.toLocaleString("fr-GN")} GNF\n` +
+      (fee > 0 ? `Frais de livraison : ${fee.toLocaleString("fr-GN")} GNF\n` : "") +
+      `*Total à payer : ${total.toLocaleString("fr-GN")} GNF*\n\n` +
+      `Nous vous contacterons à votre arrivée. Merci de votre confiance ! 🌸`,
     );
   }
 
-  // ── Planifier une livraison ──────────────────────────────────────────────
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-
     const formData = new FormData(event.currentTarget);
     formData.set("orderId", orderId);
 
     startTransition(async () => {
       try {
         await createDelivery(formData);
-        // Optimistic : on reconstruit l'objet localement pour éviter un refresh complet
         const scheduledAt = new Date(String(formData.get("scheduledAt")));
         setLocalDelivery({
-          id: "pending", // sera remplacé après revalidation
+          id: "pending",
           status: "PLANIFIEE",
           scheduledAt,
           deliveredAt: null,
           livreur: String(formData.get("livreur") ?? "") || null,
+          deliveryFee: Math.max(0, Number(formData.get("deliveryFee") ?? 0)),
           notes: String(formData.get("notes") ?? "") || null,
         });
         setShowForm(false);
@@ -79,18 +83,11 @@ export function DeliveryPanel({
     });
   }
 
-  // ── Changer statut livraison ─────────────────────────────────────────────
   async function handleStatusChange(deliveryId: string, status: DeliveryStatus) {
     startTransition(async () => {
       await updateDeliveryStatus(deliveryId, status);
       setLocalDelivery((prev) =>
-        prev
-          ? {
-              ...prev,
-              status,
-              deliveredAt: status === "LIVREE" ? new Date() : prev.deliveredAt,
-            }
-          : prev,
+        prev ? { ...prev, status, deliveredAt: status === "LIVREE" ? new Date() : prev.deliveredAt } : prev,
       );
     });
   }
@@ -98,6 +95,8 @@ export function DeliveryPanel({
   const deliveryCfg = localDelivery
     ? DELIVERY_STATUS_CONFIG[localDelivery.status as DeliveryStatus]
     : null;
+
+  const totalWithDelivery = orderFinalTotal + (localDelivery?.deliveryFee ?? 0);
 
   return (
     <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
@@ -130,7 +129,7 @@ export function DeliveryPanel({
         </div>
       )}
 
-      {/* Formulaire de planification */}
+      {/* Formulaire */}
       {!localDelivery && showForm && (
         <form onSubmit={handleCreate} className="space-y-3">
           <label className="block space-y-1">
@@ -154,6 +153,18 @@ export function DeliveryPanel({
           </label>
 
           <label className="block space-y-1">
+            <span className="text-sm font-medium">Frais de livraison (GNF)</span>
+            <input
+              type="number"
+              name="deliveryFee"
+              min="0"
+              defaultValue={0}
+              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
+              placeholder="0"
+            />
+          </label>
+
+          <label className="block space-y-1">
             <span className="text-sm font-medium">Notes (optionnel)</span>
             <textarea
               name="notes"
@@ -163,18 +174,6 @@ export function DeliveryPanel({
             />
           </label>
 
-          {/* Pré-aperçu du message WhatsApp */}
-          <div className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-sand)] p-3 text-xs text-[var(--color-muted)]">
-            <p className="mb-1 font-medium text-[var(--color-accent)]">Message WhatsApp généré</p>
-            <p>
-              Bonjour {orderName} 👋{"\n"}
-              Votre commande Glow by Imane #{orderNumber} (
-              {orderTotal.toLocaleString("fr-GN")} GNF) sera livrée le [date choisie] à{" "}
-              {orderQuartier}.{"\n"}
-              Nous vous contacterons à votre arrivée. Merci de votre confiance ! 🌸
-            </p>
-          </div>
-
           <div className="flex gap-2">
             <button
               type="submit"
@@ -183,11 +182,7 @@ export function DeliveryPanel({
             >
               {isPending ? "Planification…" : "Confirmer"}
             </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="text-sm text-[var(--color-muted)]"
-            >
+            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-[var(--color-muted)]">
               Annuler
             </button>
           </div>
@@ -216,6 +211,20 @@ export function DeliveryPanel({
                 <dd className="font-medium">{localDelivery.livreur}</dd>
               </div>
             )}
+            <div>
+              <dt className="text-[var(--color-muted)]">Frais livraison</dt>
+              <dd className="font-medium">
+                {localDelivery.deliveryFee > 0
+                  ? `${localDelivery.deliveryFee.toLocaleString("fr-GN")} GNF`
+                  : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[var(--color-muted)]">Total à encaisser</dt>
+              <dd className="font-semibold text-[var(--color-accent)]">
+                {totalWithDelivery.toLocaleString("fr-GN")} GNF
+              </dd>
+            </div>
             {localDelivery.deliveredAt && (
               <div className="col-span-2">
                 <dt className="text-[var(--color-muted)]">Livré le</dt>
@@ -237,7 +246,6 @@ export function DeliveryPanel({
             )}
           </dl>
 
-          {/* Actions sur le statut */}
           {localDelivery.status !== "LIVREE" && localDelivery.id !== "pending" && (
             <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
               {localDelivery.status === "PLANIFIEE" && (
@@ -277,7 +285,6 @@ export function DeliveryPanel({
             </div>
           )}
 
-          {/* Lien WhatsApp notification */}
           <a
             href={`https://wa.me/224${orderPhone.replace(/^0/, "")}?text=${buildWhatsAppMessage(localDelivery.scheduledAt.toString())}`}
             target="_blank"

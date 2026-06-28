@@ -80,7 +80,7 @@ export function ShopPageClient({ products, categories }: ShopPageClientProps) {
   return (
     <main className="pb-36 text-[var(--color-foreground)]">
       <section
-        className="px-4 mt-4 transition-opacity"
+        className="px-4 pb-4 mt-4 transition-opacity"
         style={{
           opacity: heroOpacity,
           pointerEvents: heroOpacity < 0.1 ? "none" : "auto",
