@@ -2,17 +2,20 @@ import type {
   Category,
   Customer,
   Delivery,
+  Kit,
+  KitItem,
   Order,
   OrderItem,
   Product,
+  ProductPackPrice,
+  ProductSize,
 } from "@prisma/client";
 
 // ─── Panier / commande entrante (catalogue public) ───────────────────────────
 
-export type CartItemInput = {
-  productId: string;
-  quantity: number;
-};
+export type CartItemInput =
+  | { kind: "product"; productId: string; productSizeId?: string | null; quantity: number }
+  | { kind: "kit"; kitId: string; quantity: number };
 
 export type OrderInput = {
   name: string;
@@ -33,60 +36,60 @@ export type OrderStatus =
   | "LIVREE"
   | "ANNULEE";
 
-export type DeliveryStatus =
-  | "PLANIFIEE"
-  | "EN_COURS"
-  | "LIVREE"
-  | "ECHOUEE"
-  | "REPORTEE";
+export type DeliveryStatus = "PLANIFIEE" | "EN_COURS" | "LIVREE" | "ECHOUEE" | "REPORTEE";
 
 // ─── Compositions Prisma — commandes ─────────────────────────────────────────
 
-/** Article avec produit complet */
+/** Un OrderItem référence soit un produit (avec taille optionnelle), soit un kit — jamais les deux.
+ *  NB : nécessite la migration rendant OrderItem.productId optionnel (cf. schema.prisma). */
 export type OrderItemWithProduct = OrderItem & {
-  product: Product;
+  product: Pick<Product, "id" | "name"> | null;
+  productSize: Pick<ProductSize, "id" | "label"> | null;
+  kit: Pick<Kit, "id" | "name"> | null;
 };
 
-/** Article avec produit minimal (nom uniquement) */
-export type OrderItemWithProductName = OrderItem & {
-  product: Pick<Product, "id" | "name">;
-};
+export type OrderWithItems = Order & { items: OrderItemWithProduct[] };
 
-/** Commande avec ses articles et produits complets */
-export type OrderWithItems = Order & {
-  items: OrderItemWithProduct[];
-};
-
-/** Commande avec articles (nom produit) + livraison + client */
 export type OrderWithDetails = Order & {
-  items: OrderItemWithProductName[];
+  items: OrderItemWithProduct[];
   delivery: Delivery | null;
   customer: Customer | null;
 };
 
-/** Commande avec articles (nom produit) + livraison partielle — pour la liste admin */
 export type OrderListRow = Order & {
-  items: OrderItemWithProductName[];
+  items: OrderItemWithProduct[];
   delivery: Pick<Delivery, "status" | "scheduledAt"> | null;
 };
 
 // ─── Compositions Prisma — livraisons ────────────────────────────────────────
 
-/** Livraison avec infos commande pour la vue calendrier */
 export type DeliveryWithOrder = Delivery & {
   order: Pick<Order, "id" | "number" | "name" | "phone" | "quartier" | "estimatedTotal">;
 };
 
 // ─── Compositions Prisma — produits ──────────────────────────────────────────
 
-/** Produit avec sa catégorie et le compteur de commandes associées */
-export type ProductWithCategory = Product & {
-  category: Pick<Category, "id" | "name">;
-};
+export type ProductWithCategory = Product & { category: Pick<Category, "id" | "name"> };
 
 export type ProductAdminRow = Product & {
   category: Pick<Category, "id" | "name">;
   _count: { orderItems: number };
+};
+
+/** Produit avec catégorie, tailles et paliers — ProductCard, fiche produit, ShopPageClient */
+export type ProductWithPricing = Product & {
+  category: Pick<Category, "id" | "name">;
+  sizes: ProductSize[];
+  packPrices: ProductPackPrice[];
+};
+
+// ─── Compositions Prisma — kits ──────────────────────────────────────────────
+
+export type KitWithItems = Kit & {
+  items: (KitItem & {
+    product: Pick<Product, "id" | "name" | "stock">;
+    productSize: Pick<ProductSize, "id" | "label" | "stock"> | null;
+  })[];
 };
 
 // ─── Params de pages Next.js ─────────────────────────────────────────────────

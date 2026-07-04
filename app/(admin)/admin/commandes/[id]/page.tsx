@@ -74,7 +74,7 @@ export default async function OrderDetailPage({ params }: Props) {
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-sand)] text-xs font-semibold text-[var(--color-accent)]">
                       {item.quantity}
                     </span>
-                    <span className="text-sm">{item.product.name}</span>
+                    <span className="text-sm">{item.product?.name ?? "Produit supprimé"}</span>
                   </div>
                   <span className="shrink-0 text-sm font-medium">
                     {(item.unitPrice * item.quantity).toLocaleString("fr-GN")} GNF
@@ -110,11 +110,16 @@ export default async function OrderDetailPage({ params }: Props) {
             orderQuartier={order.quartier}
             orderFinalTotal={order.finalTotal}
             delivery={order.delivery ? {
-              ...order.delivery,
+              id: order.delivery.id,
+              status: order.delivery.status,
+              scheduledAt: order.delivery.scheduledAt,
+              deliveredAt: order.delivery.deliveredAt,
+              livreur: order.delivery.livreurId ?? null,
               deliveryFee: order.delivery.deliveryFee ?? 0,
+              notes: order.delivery.notes,
             } : null}
           />
-        </div>
+        </div> 
 
         {/* Colonne client */}
         <div className="space-y-4">

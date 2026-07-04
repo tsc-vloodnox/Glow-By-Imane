@@ -1,4 +1,3 @@
-// Destination : app/(shop)/commande/CheckoutPageClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -6,8 +5,8 @@ import { useEffect, useState } from "react";
 
 import { createOrder, refreshCartPrices } from "../actions";
 import { useCart } from "../CartContext";
+import { resolveLineTotal } from "@/lib/pricing";
 
-// Numéros guinéens : 9 chiffres commençant par 6, avec ou sans indicatif +224
 const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
 
 export default function CheckoutPageClient() {
@@ -18,9 +17,6 @@ export default function CheckoutPageClient() {
   const [priceNotice, setPriceNotice] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
-  // Revalide les prix côté serveur dès l'arrivée sur le checkout, pour que
-  // le total affiché ici corresponde exactement à ce qui sera facturé
-  // (avant : le prix restait figé au moment de l'ajout au panier).
   useEffect(() => {
     if (items.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -28,28 +24,13 @@ export default function CheckoutPageClient() {
       return;
     }
 
-    refreshCartPrices(
-      items.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        price: item.price,
-      })),
-    )
+    refreshCartPrices(items)
       .then((result) => {
-        const updatedCartItems = result.items.map((item) => ({
-          productId: item.productId,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity,
-          stock: item.stock,
-        }));
-
-        replaceAll(updatedCartItems);
-
+        replaceAll(result.items);
         if (result.priceChanged) {
           setPriceNotice("Certains prix ont été mis à jour depuis l'ajout au panier. Le total ci-dessous est à jour.");
         }
-        if (result.removedProductIds.length > 0) {
+        if (result.removedKeys.length > 0) {
           setPriceNotice((prev) =>
             [prev, "Un ou plusieurs articles ne sont plus disponibles et ont été retirés."]
               .filter(Boolean)
@@ -57,11 +38,8 @@ export default function CheckoutPageClient() {
           );
         }
       })
-      .catch(() => {
-        // En cas d'échec réseau, on garde les valeurs locales plutôt que de bloquer la page
-      })
+      .catch(() => {})
       .finally(() => setIsRefreshing(false));
-    // On ne veut revalider qu'une fois à l'arrivée sur la page, pas à chaque changement d'items
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -87,7 +65,16 @@ export default function CheckoutPageClient() {
       phone,
       quartier: String(formData.get("quartier") || "").trim(),
       comment: String(formData.get("comment") || "").trim() || undefined,
-      items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+      items: items.map((item) =>
+        item.kind === "kit"
+          ? { kind: "kit" as const, kitId: item.kitId!, quantity: item.quantity }
+          : {
+              kind: "product" as const,
+              productId: item.productId!,
+              productSizeId: item.productSizeId,
+              quantity: item.quantity,
+            },
+      ),
     };
 
     setIsSubmitting(true);
@@ -121,9 +108,9 @@ export default function CheckoutPageClient() {
         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">Résumé</p>
         <div className="mt-3 space-y-2 text-sm">
           {items.map((item) => (
-            <div key={item.productId} className="flex items-center justify-between">
+            <div key={item.cartKey} className="flex items-center justify-between">
               <span>{item.name} x{item.quantity}</span>
-              <span>{(item.price * item.quantity).toLocaleString("fr-GN")} GNF</span>
+              <span>{resolveLineTotal(item.basePrice, item.packPrices, item.quantity).toLocaleString("fr-GN")} GNF</span>
             </div>
           ))}
         </div>
@@ -136,12 +123,7 @@ export default function CheckoutPageClient() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <label className="block space-y-1">
           <span className="text-sm font-medium">Nom complet</span>
-          <input
-            name="name"
-            required
-            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
-            placeholder="Votre nom"
-          />
+          <input name="name" required className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="Votre nom" />
         </label>
 
         <label className="block space-y-1">
@@ -152,9 +134,7 @@ export default function CheckoutPageClient() {
             type="tel"
             inputMode="numeric"
             onChange={() => setPhoneError(null)}
-            className={`w-full rounded-xl border px-4 py-3 ${
-              phoneError ? "border-red-300" : "border-[var(--color-border)]"
-            }`}
+            className={`w-full rounded-xl border px-4 py-3 ${phoneError ? "border-red-300" : "border-[var(--color-border)]"}`}
             placeholder="6XX XX XX XX"
           />
           {phoneError ? <span className="text-xs text-red-600">{phoneError}</span> : null}
@@ -162,22 +142,12 @@ export default function CheckoutPageClient() {
 
         <label className="block space-y-1">
           <span className="text-sm font-medium">Quartier</span>
-          <input
-            name="quartier"
-            required
-            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
-            placeholder="Ex. Kaloum"
-          />
+          <input name="quartier" required className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="Ex. Kaloum" />
         </label>
 
         <label className="block space-y-1">
           <span className="text-sm font-medium">Commentaire (optionnel)</span>
-          <textarea
-            name="comment"
-            rows={3}
-            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
-            placeholder="Instructions de livraison..."
-          />
+          <textarea name="comment" rows={3} className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="Instructions de livraison..." />
         </label>
 
         <p className="rounded-xl bg-[var(--color-blush)]/60 px-4 py-3 text-xs text-[var(--color-muted)]">

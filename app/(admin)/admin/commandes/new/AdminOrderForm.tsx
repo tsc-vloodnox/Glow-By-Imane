@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { createAdminOrder } from "../actions";
 
 type Product = { id: string; name: string; price: number; categoryId: string };
@@ -206,7 +207,7 @@ export function AdminOrderForm({ products }: Props) {
         >
           {isPending ? "Création…" : "Créer la commande"}
         </button>
-        <a href="/admin/commandes" className="text-sm text-[var(--color-muted)]">Annuler</a>
+        <Link href="/admin/commandes" className="text-sm text-[var(--color-muted)]">Annuler</Link>
       </div>
     </form>
   );

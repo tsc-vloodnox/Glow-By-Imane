@@ -13,9 +13,11 @@ type ProductImageProps = {
   // Optionnel : affiche un badge "N photos" sur la card home si le produit
   // a plusieurs images (invite l'utilisateur à cliquer pour voir le slider).
   imageCount?: number;
+  // Optionnel : atténue et désature l'image (ex: produit en rupture de stock).
+  dim?: boolean;
 };
 
-export function ProductImage({ imageName, alt, className, imageCount }: ProductImageProps) {
+export function ProductImage({ imageName, alt, className, imageCount, dim }: ProductImageProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const src = catalogPath(imageName);
 
@@ -28,15 +30,17 @@ export function ProductImage({ imageName, alt, className, imageCount }: ProductI
   }
 
   return (
-    <div className={`relative ${className ?? ""}`}>
-      {/* {!isLoaded ? <Skeleton className="absolute inset-0 h-full w-full" /> : null} */}
+    <div className={`relative overflow-hidden ${className ?? ""}`}>
+      {!isLoaded ? <Skeleton className="absolute inset-0 h-full w-full" /> : null}
       <img
         src={src}
         alt={alt}
         loading="lazy"
         onLoad={() => setIsLoaded(true)}
         onError={() => setIsLoaded(true)}
-        className="h-full w-full object-cover transition-opacity duration-300"
+        className={`h-full w-full object-cover transition-opacity duration-300 ${
+          isLoaded ? (dim ? "opacity-60 grayscale" : "opacity-100") : "opacity-0"
+        }`}
       />
       {/* Badge discret indiquant qu'il y a d'autres photos sur la fiche produit */}
       {imageCount && imageCount > 1 ? (

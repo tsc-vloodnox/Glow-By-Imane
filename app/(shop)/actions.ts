@@ -1,12 +1,13 @@
-// Destination : app/(shop)/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
 
 import type { OrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { resolveLineTotal } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
-import type { OrderInput } from "@/types/types";
+import type { CartItemInput, OrderInput } from "@/types/types";
+import type { CartItem } from "@/lib/cart";
 
 export async function createOrder(data: OrderInput) {
   if (data.items.length === 0) {
@@ -14,70 +15,135 @@ export async function createOrder(data: OrderInput) {
   }
 
   const order = await prisma.$transaction(async (tx) => {
-    const products = await tx.product.findMany({
-      where: { id: { in: data.items.map((item) => item.productId) } },
-    });
+    const productItems = data.items.filter(
+      (i): i is Extract<CartItemInput, { kind: "product" }> => i.kind === "product",
+    );
+    const kitItems = data.items.filter(
+      (i): i is Extract<CartItemInput, { kind: "kit" }> => i.kind === "kit",
+    );
 
-    const productMap = new Map(products.map((product) => [product.id, product]));
+    const products = await tx.product.findMany({
+      where: { id: { in: productItems.map((i) => i.productId) } },
+      include: { sizes: true, packPrices: true },
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
+    const kits = await tx.kit.findMany({
+      where: { id: { in: kitItems.map((i) => i.kitId) } },
+      include: { items: { include: { product: true, productSize: true } } },
+    });
+    const kitMap = new Map(kits.map((k) => [k.id, k]));
+
     let estimatedTotal = 0;
-    const orderItems: {
-      productId: string;
+    const orderItemsData: {
+      productId: string | null;
+      productSizeId: string | null;
+      kitId: string | null;
       quantity: number;
       unitPrice: number;
     }[] = [];
 
-    // 1. Validation + construction des lignes de commande (prix au moment T)
-    for (const item of data.items) {
+    // 1. Validation + lignes produit (avec taille éventuelle)
+    for (const item of productItems) {
       const product = productMap.get(item.productId);
-      if (!product) {
-        throw new Error("Produit introuvable.");
-      }
+      if (!product || product.archived) throw new Error("Produit introuvable.");
 
-      estimatedTotal += product.price * item.quantity;
-      orderItems.push({
+      const size = item.productSizeId
+        ? product.sizes.find((s) => s.id === item.productSizeId && !s.archived)
+        : null;
+      if (item.productSizeId && !size) throw new Error(`Déclinaison indisponible pour ${product.name}.`);
+
+      const basePrice = size ? size.price : product.price;
+      const packPrices = product.packPrices
+        .filter((p) => p.productSizeId === (size ? size.id : null))
+        .map((p) => ({ quantity: p.quantity, price: p.price }));
+
+      const lineTotal = resolveLineTotal(basePrice, packPrices, item.quantity);
+      estimatedTotal += lineTotal;
+
+      orderItemsData.push({
         productId: product.id,
+        productSizeId: size ? size.id : null,
+        kitId: null,
         quantity: item.quantity,
-        unitPrice: product.price,
+        unitPrice: Math.round(lineTotal / item.quantity),
       });
     }
 
-    // 2. Décrémentation ATOMIQUE du stock — la condition stock >= quantity
-    //    est vérifiée par la base elle-même au moment de l'écriture, pas avant.
-    //    Si deux commandes arrivent en même temps sur le même produit,
-    //    une seule pourra décrémenter avec succès ; l'autre échoue ici
-    //    et la transaction entière est annulée (rollback automatique).
-    for (const item of data.items) {
-      const product = productMap.get(item.productId)!;
+    // 2. Validation + lignes kit
+    for (const item of kitItems) {
+      const kit = kitMap.get(item.kitId);
+      if (!kit || kit.archived) throw new Error("Kit introuvable.");
 
-      const result = await tx.product.updateMany({
-        where: {
-          id: item.productId,
-          stock: { gte: item.quantity },
-        },
-        data: { stock: { decrement: item.quantity } },
+      estimatedTotal += kit.price * item.quantity;
+      orderItemsData.push({
+        productId: null,
+        productSizeId: null,
+        kitId: kit.id,
+        quantity: item.quantity,
+        unitPrice: kit.price,
       });
+    }
 
-      if (result.count === 0) {
-        throw new Error(`Stock insuffisant pour ${product.name}.`);
+    // 3. Décrémentation ATOMIQUE — produits/tailles directs
+    for (const item of productItems) {
+      const product = productMap.get(item.productId)!;
+      if (item.productSizeId) {
+        const result = await tx.productSize.updateMany({
+          where: { id: item.productSizeId, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (result.count === 0) throw new Error(`Stock insuffisant pour ${product.name}.`);
+      } else {
+        const result = await tx.product.updateMany({
+          where: { id: item.productId, stock: { gte: item.quantity } },
+          data: { stock: { decrement: item.quantity } },
+        });
+        if (result.count === 0) throw new Error(`Stock insuffisant pour ${product.name}.`);
       }
     }
 
-    // 3. Création de la commande seulement si tout le stock a été réservé avec succès
-    const newOrder = await tx.order.create({
+    // 4. Décrémentation ATOMIQUE — articles composant chaque kit commandé
+    for (const item of kitItems) {
+      const kit = kitMap.get(item.kitId)!;
+      for (const kitItem of kit.items) {
+        const neededQty = kitItem.quantity * item.quantity;
+        if (kitItem.productSizeId) {
+          const result = await tx.productSize.updateMany({
+            where: { id: kitItem.productSizeId, stock: { gte: neededQty } },
+            data: { stock: { decrement: neededQty } },
+          });
+          if (result.count === 0) throw new Error(`Stock insuffisant pour composer le kit "${kit.name}".`);
+        } else {
+          const result = await tx.product.updateMany({
+            where: { id: kitItem.productId, stock: { gte: neededQty } },
+            data: { stock: { decrement: neededQty } },
+          });
+          if (result.count === 0) throw new Error(`Stock insuffisant pour composer le kit "${kit.name}".`);
+        }
+      }
+    }
+
+    // 5. Création de la commande seulement si tout le stock a été réservé
+    return tx.order.create({
       data: {
         name: data.name,
         phone: data.phone,
         quartier: data.quartier,
         comment: data.comment,
         estimatedTotal,
-        items: { create: orderItems },
+        items: { create: orderItemsData },
       },
       include: {
-        items: { include: { product: true } },
+        items: {
+          include: {
+            product: { select: { id: true, name: true } },
+            productSize: { select: { id: true, label: true } },
+            kit: { select: { id: true, name: true } },
+          },
+        },
       },
     });
-
-    return newOrder;
   });
 
   revalidatePath("/admin/commandes");
@@ -91,57 +157,94 @@ export async function createOrder(data: OrderInput) {
 }
 
 export async function updateOrderStatus(orderId: string, status: OrderStatus) {
-  await prisma.order.update({
-    where: { id: orderId },
-    data: { status },
-  });
-
+  await prisma.order.update({ where: { id: orderId }, data: { status } });
   revalidatePath("/admin/commandes");
 }
 
 /**
- * Revalide les prix et la disponibilité d'un panier côté serveur, juste avant
- * l'affichage du checkout. Le panier client stocke le prix au moment de
- * l'ajout — s'il a changé en base depuis, on renvoie la valeur à jour pour
- * que le total affiché corresponde exactement à ce qui sera facturé,
- * et on signale qu'un ajustement a eu lieu.
+ * Revalide prix/stock/dispo d'un panier côté serveur avant l'affichage du checkout.
+ * Reçoit le panier client tel quel (CartItem[]) et renvoie une version à jour,
+ * en recalculant chaque total avec la même fonction que le client (resolveLineTotal)
+ * pour détecter fidèlement tout changement de prix.
  */
-export async function refreshCartPrices(
-  items: { productId: string; quantity: number; price: number }[],
-) {
+export async function refreshCartPrices(items: CartItem[]) {
   if (items.length === 0) {
-    return { items: [], priceChanged: false, removedProductIds: [] as string[] };
+    return { items: [] as CartItem[], priceChanged: false, removedKeys: [] as string[] };
   }
 
-  const products = await prisma.product.findMany({
-    where: { id: { in: items.map((item) => item.productId) } },
-  });
-  const productMap = new Map(products.map((product) => [product.id, product]));
+  const productIds = items.filter((i) => i.kind === "product").map((i) => i.productId!);
+  const kitIds = items.filter((i) => i.kind === "kit").map((i) => i.kitId!);
 
+  const [products, kits] = await Promise.all([
+    prisma.product.findMany({ where: { id: { in: productIds } }, include: { sizes: true, packPrices: true } }),
+    prisma.kit.findMany({
+      where: { id: { in: kitIds } },
+      include: {
+        items: { include: { product: { select: { stock: true } }, productSize: { select: { stock: true } } } },
+      },
+    }),
+  ]);
+
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  const kitMap = new Map(kits.map((k) => [k.id, k]));
+
+  const removedKeys: string[] = [];
   let priceChanged = false;
-  const removedProductIds: string[] = [];
 
   const refreshedItems = items
     .map((item) => {
-      const product = productMap.get(item.productId);
-      if (!product) {
-        removedProductIds.push(item.productId);
+      const oldTotal = resolveLineTotal(item.basePrice, item.packPrices, item.quantity);
+
+      if (item.kind === "kit") {
+        const kit = kitMap.get(item.kitId!);
+        if (!kit || kit.archived) {
+          removedKeys.push(item.cartKey);
+          return null;
+        }
+        const kitStock = kit.items.reduce((min, ki) => {
+          const available = ki.productSize ? ki.productSize.stock : ki.product.stock;
+          return Math.min(min, Math.floor(available / ki.quantity));
+        }, Infinity);
+        const quantity = Math.min(item.quantity, Math.max(kitStock, 0));
+        if (kit.price * quantity !== oldTotal) priceChanged = true;
+
+        return { ...item, name: kit.name, basePrice: kit.price, packPrices: [], quantity, stock: kitStock };
+      }
+
+      const product = productMap.get(item.productId!);
+      if (!product || product.archived) {
+        removedKeys.push(item.cartKey);
         return null;
       }
 
-      if (product.price !== item.price) {
-        priceChanged = true;
+      const size = item.productSizeId
+        ? product.sizes.find((s) => s.id === item.productSizeId && !s.archived)
+        : null;
+      if (item.productSizeId && !size) {
+        removedKeys.push(item.cartKey);
+        return null;
       }
 
+      const basePrice = size ? size.price : product.price;
+      const stock = size ? size.stock : product.stock;
+      const packPrices = product.packPrices
+        .filter((p) => p.productSizeId === (size ? size.id : null))
+        .map((p) => ({ quantity: p.quantity, price: p.price }));
+
+      const quantity = Math.min(item.quantity, Math.max(stock, 0));
+      if (resolveLineTotal(basePrice, packPrices, quantity) !== oldTotal) priceChanged = true;
+
       return {
-        productId: product.id,
-        name: product.name,
-        price: product.price,
-        quantity: Math.min(item.quantity, Math.max(product.stock, 0)),
-        stock: product.stock,
+        ...item,
+        name: size ? `${product.name} — ${size.label}` : product.name,
+        sizeLabel: size ? size.label : null,
+        basePrice,
+        packPrices,
+        quantity,
+        stock,
       };
     })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  return { items: refreshedItems, priceChanged, removedProductIds };
+  return { items: refreshedItems, priceChanged, removedKeys };
 }

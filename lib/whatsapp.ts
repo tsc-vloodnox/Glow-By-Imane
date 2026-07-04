@@ -1,16 +1,13 @@
 import type { OrderWithItems } from "@/types/types";
 
-type CustomerDetails = {
-  name: string;
-  phone: string;
-  quartier: string;
-  comment?: string;
-};
+type CustomerDetails = { name: string; phone: string; quartier: string; comment?: string };
 
 export function buildOrderMessage(order: OrderWithItems, customer: CustomerDetails): string {
-  const lines = order.items.map(
-    (item) => `- ${item.product.name} x${item.quantity}`,
-  );
+  const lines = order.items.map((item) => {
+    if (item.kit) return `- ${item.kit.name} (kit) x${item.quantity}`;
+    const sizePart = item.productSize ? ` (${item.productSize.label})` : "";
+    return `- ${item.product?.name ?? "Article"}${sizePart} x${item.quantity}`;
+  });
 
   const customerInfo = [
     `Nom : ${customer.name}`,

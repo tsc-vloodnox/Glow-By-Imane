@@ -6,6 +6,21 @@ import { useState, useTransition } from "react";
 import { archiveProduct, deleteProduct, restoreProduct, updateProduct } from "../actions";
 import { uploadProductImage } from "./upload";
 
+type ProductSizeRow = {
+  id: string; // id réel si existant, "tmp_..." si pas encore enregistré
+  label: string;
+  price: number;
+  stock: number;
+  archived: boolean;
+};
+
+type PackPriceRow = {
+  id: string; // id réel si existant, "tmp_..." si pas encore enregistré
+  quantity: number;
+  price: number;
+  productSizeId: string | null; // null = s'applique au produit entier
+};
+
 type ProductRow = {
   id: string;
   name: string;
@@ -17,6 +32,8 @@ type ProductRow = {
   categoryId: string;
   category: { id: string; name: string };
   images: string[];
+  sizes: ProductSizeRow[];
+  packPrices: PackPriceRow[];
   _count: { orderItems: number };
 };
 
@@ -27,6 +44,29 @@ type AdminProductsTableProps = {
 };
 
 type Filter = "actifs" | "archives";
+
+function newTempId() {
+  return `tmp_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+function normalizeSizes(sizes: ProductSizeRow[]) {
+  return sizes
+    .filter((s) => !s.archived)
+    .map((s) => ({ label: s.label.trim(), price: s.price, stock: s.stock }));
+}
+
+function normalizePackPrices(sizes: ProductSizeRow[], packs: PackPriceRow[]) {
+  // On compare par label de taille plutôt que par id, car les tailles nouvellement
+  // créées changent d'id (temporaire → réel) après le premier enregistrement.
+  const labelById = new Map(sizes.map((s) => [s.id, s.label.trim()]));
+  return packs
+    .filter((p) => p.quantity > 0 && p.price > 0)
+    .map((p) => ({
+      quantity: p.quantity,
+      price: p.price,
+      sizeLabel: p.productSizeId ? labelById.get(p.productSizeId) ?? "" : "",
+    }));
+}
 
 export function AdminProductsTable({ initialProducts, categories, storageBaseUrl }: AdminProductsTableProps) {
   const [isPending, startTransition] = useTransition();
@@ -42,6 +82,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
   const [stockFilter, setStockFilter] = useState<"tous" | "rupture" | "bas">("tous");
   const [actionError, setActionError] = useState<string | null>(null);
   const [editingImagesId, setEditingImagesId] = useState<string | null>(null);
+  const [editingPricingId, setEditingPricingId] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   function updateField(productId: string, field: keyof ProductRow, value: string | boolean | number) {
@@ -60,7 +101,10 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
       original.stock !== product.stock ||
       original.favorite !== product.favorite ||
       original.categoryId !== product.categoryId ||
-      JSON.stringify(original.images) !== JSON.stringify(product.images)
+      JSON.stringify(original.images) !== JSON.stringify(product.images) ||
+      JSON.stringify(normalizeSizes(original.sizes)) !== JSON.stringify(normalizeSizes(product.sizes)) ||
+      JSON.stringify(normalizePackPrices(original.sizes, original.packPrices)) !==
+        JSON.stringify(normalizePackPrices(product.sizes, product.packPrices))
     );
   }
 
@@ -103,6 +147,103 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
     }
   }
 
+  // ─── Tailles ────────────────────────────────────────────────────────────
+
+  function addSize(productId: string) {
+    const product = products.find((p) => p.id === productId);
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? {
+              ...p,
+              sizes: [
+                ...p.sizes,
+                { id: newTempId(), label: "", price: product?.price ?? 0, stock: 0, archived: false },
+              ],
+            }
+          : p,
+      ),
+    );
+    setEditingPricingId(productId);
+  }
+
+  function updateSize(
+    productId: string,
+    sizeId: string,
+    field: "label" | "price" | "stock",
+    value: string | number,
+  ) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? { ...p, sizes: p.sizes.map((s) => (s.id === sizeId ? { ...s, [field]: value } : s)) }
+          : p,
+      ),
+    );
+  }
+
+  function removeSize(productId: string, sizeId: string) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? {
+              ...p,
+              sizes: p.sizes.filter((s) => s.id !== sizeId),
+              // Un palier rattaché à cette taille redevient un palier "produit entier"
+              // plutôt que d'être supprimé silencieusement.
+              packPrices: p.packPrices.map((pp) =>
+                pp.productSizeId === sizeId ? { ...pp, productSizeId: null } : pp,
+              ),
+            }
+          : p,
+      ),
+    );
+  }
+
+  // ─── Paliers de quantité ────────────────────────────────────────────────
+
+  function addPackPrice(productId: string) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? {
+              ...p,
+              packPrices: [
+                ...p.packPrices,
+                { id: newTempId(), quantity: 1, price: 0, productSizeId: null },
+              ],
+            }
+          : p,
+      ),
+    );
+    setEditingPricingId(productId);
+  }
+
+  function updatePackPrice(
+    productId: string,
+    packId: string,
+    field: "quantity" | "price" | "productSizeId",
+    value: string | number | null,
+  ) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? { ...p, packPrices: p.packPrices.map((pp) => (pp.id === packId ? { ...pp, [field]: value } : pp)) }
+          : p,
+      ),
+    );
+  }
+
+  function removePackPrice(productId: string, packId: string) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, packPrices: p.packPrices.filter((pp) => pp.id !== packId) } : p,
+      ),
+    );
+  }
+
+  // ─── Sauvegarde ─────────────────────────────────────────────────────────
+
   async function handleSave(productId: string) {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
@@ -115,14 +256,64 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
     formData.set("categoryId", product.categoryId);
     formData.set("favorite", product.favorite ? "on" : "");
     formData.set("images", product.images.join("\n"));
+    formData.set(
+      "sizes",
+      JSON.stringify(
+        product.sizes
+          .filter((s) => s.label.trim())
+          .map((s) => ({
+            id: s.id.startsWith("tmp_") ? undefined : s.id,
+            label: s.label.trim(),
+            price: s.price,
+            stock: s.stock,
+            archived: s.archived,
+          })),
+      ),
+    );
+    formData.set(
+      "packPrices",
+      JSON.stringify(
+        product.packPrices
+          .filter((p) => p.quantity > 0 && p.price > 0)
+          .map((p) => ({
+            id: p.id.startsWith("tmp_") ? undefined : p.id,
+            quantity: p.quantity,
+            price: p.price,
+            productSizeId: p.productSizeId,
+          })),
+      ),
+    );
 
+    setActionError(null);
     setSavingId(productId);
     startTransition(async () => {
-      await updateProduct(productId, formData);
-      setSavedProducts((prev) => prev.map((p) => (p.id === productId ? product : p)));
-      setSavingId(null);
-      setJustSavedId(productId);
-      setTimeout(() => setJustSavedId((cur) => (cur === productId ? null : cur)), 2000);
+      try {
+        const updated = await updateProduct(productId, formData);
+        const merged: ProductRow = {
+          ...product,
+          sizes: updated.sizes.map((s) => ({
+            id: s.id,
+            label: s.label,
+            price: s.price,
+            stock: s.stock,
+            archived: s.archived,
+          })),
+          packPrices: updated.packPrices.map((p) => ({
+            id: p.id,
+            quantity: p.quantity,
+            price: p.price,
+            productSizeId: p.productSizeId,
+          })),
+        };
+        setProducts((prev) => prev.map((p) => (p.id === productId ? merged : p)));
+        setSavedProducts((prev) => prev.map((p) => (p.id === productId ? merged : p)));
+        setJustSavedId(productId);
+        setTimeout(() => setJustSavedId((cur) => (cur === productId ? null : cur)), 2000);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Erreur lors de l'enregistrement.");
+      } finally {
+        setSavingId(null);
+      }
     });
   }
 
@@ -272,6 +463,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
             const thumbnail = product.images[0]
               ? `${storageBaseUrl}/${product.images[0]}`
               : null;
+            const activeSizes = product.sizes.filter((s) => !s.archived);
 
             return (
               <div
@@ -353,7 +545,9 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                       </select>
 
                       <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
-                        <span className="shrink-0 text-[var(--color-muted)]">Prix</span>
+                        <span className="shrink-0 text-[var(--color-muted)]">
+                          {activeSizes.length > 0 ? "Prix (défaut)" : "Prix"}
+                        </span>
                         <input
                           type="number"
                           min="0"
@@ -366,7 +560,9 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                       </label>
 
                       <label className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm">
-                        <span className="shrink-0 text-[var(--color-muted)]">Stock</span>
+                        <span className="shrink-0 text-[var(--color-muted)]">
+                          {activeSizes.length > 0 ? "Stock (défaut)" : "Stock"}
+                        </span>
                         <input
                           type="number"
                           min="0"
@@ -378,6 +574,11 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                         />
                       </label>
                     </div>
+                    {activeSizes.length > 0 && (
+                      <p className="mt-1 text-[10px] text-[var(--color-muted)]">
+                        Ce produit a des tailles : le prix/stock ci-dessus ne sert que de valeur par défaut.
+                      </p>
+                    )}
 
                     {/* Favori */}
                     {!product.archived && (
@@ -389,6 +590,186 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                         />
                         <span className="text-[var(--color-muted)]">Mettre en favori</span>
                       </label>
+                    )}
+
+                    {/* Tailles & Tarifs */}
+                    {!product.archived && (
+                      <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingPricingId(
+                              editingPricingId === product.id ? null : product.id,
+                            )
+                          }
+                          className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+                        >
+                          <span>💰</span>
+                          {editingPricingId === product.id
+                            ? "Fermer tailles & tarifs"
+                            : activeSizes.length > 0 || product.packPrices.length > 0
+                            ? [
+                                activeSizes.length > 0 ? `Tailles (${activeSizes.length})` : null,
+                                product.packPrices.length > 0 ? `Paliers (${product.packPrices.length})` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")
+                            : "Tailles & paliers de prix"}
+                        </button>
+
+                        {editingPricingId === product.id && (
+                          <div className="mt-3 space-y-4 rounded-xl bg-[var(--color-sand)] p-3">
+                            {/* Déclinaisons (tailles) */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium text-[var(--color-muted)]">
+                                  Déclinaisons (tailles / contenances)
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => addSize(product.id)}
+                                  className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+                                >
+                                  + Ajouter une taille
+                                </button>
+                              </div>
+
+                              {activeSizes.length === 0 ? (
+                                <p className="text-xs text-[var(--color-muted)]">
+                                  Aucune déclinaison — ce produit utilise le prix et le stock ci-dessus.
+                                </p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {activeSizes.map((size) => (
+                                    <div
+                                      key={size.id}
+                                      className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                                    >
+                                      <input
+                                        value={size.label}
+                                        onChange={(e) => updateSize(product.id, size.id, "label", e.target.value)}
+                                        placeholder="ex: 30ml"
+                                        className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                      />
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={size.price}
+                                        onChange={(e) =>
+                                          updateSize(product.id, size.id, "price", Number(e.target.value))
+                                        }
+                                        placeholder="Prix"
+                                        className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                      />
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={size.stock}
+                                        onChange={(e) =>
+                                          updateSize(product.id, size.id, "stock", Number(e.target.value))
+                                        }
+                                        placeholder="Stock"
+                                        className="w-20 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => removeSize(product.id, size.id)}
+                                        className="ml-auto text-xs text-red-500 hover:text-red-700"
+                                      >
+                                        Retirer
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Paliers de quantité */}
+                            <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium text-[var(--color-muted)]">
+                                  Paliers de quantité (ex : 3 pour 100 000 GNF)
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => addPackPrice(product.id)}
+                                  className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+                                >
+                                  + Ajouter un palier
+                                </button>
+                              </div>
+
+                              {product.packPrices.length === 0 ? (
+                                <p className="text-xs text-[var(--color-muted)]">
+                                  Aucun palier — prix proportionnel à la quantité.
+                                </p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {product.packPrices.map((pack) => (
+                                    <div
+                                      key={pack.id}
+                                      className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                                    >
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        value={pack.quantity}
+                                        onChange={(e) =>
+                                          updatePackPrice(product.id, pack.id, "quantity", Number(e.target.value))
+                                        }
+                                        placeholder="Qté"
+                                        className="w-16 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                      />
+                                      <span className="text-xs text-[var(--color-muted)]">pour</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={pack.price}
+                                        onChange={(e) =>
+                                          updatePackPrice(product.id, pack.id, "price", Number(e.target.value))
+                                        }
+                                        placeholder="Prix total"
+                                        className="w-28 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                      />
+                                      <span className="text-xs text-[var(--color-muted)]">GNF</span>
+                                      {activeSizes.length > 0 && (
+                                        <select
+                                          value={pack.productSizeId ?? ""}
+                                          onChange={(e) =>
+                                            updatePackPrice(
+                                              product.id,
+                                              pack.id,
+                                              "productSizeId",
+                                              e.target.value || null,
+                                            )
+                                          }
+                                          className="rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                                        >
+                                          <option value="">Produit entier</option>
+                                          {activeSizes.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.label}</option>
+                                          ))}
+                                        </select>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => removePackPrice(product.id, pack.id)}
+                                        className="ml-auto text-xs text-red-500 hover:text-red-700"
+                                      >
+                                        Retirer
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <p className="text-[10px] text-[var(--color-muted)]">
+                              Les tailles et paliers sont enregistrés avec le bouton &quot;Enregistrer&quot;.
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {/* Images */}

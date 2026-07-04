@@ -1,7 +1,9 @@
+// Destination : app/(shop)/produits/[slug]/page.tsx
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AddToCartButton } from "../../components/AddToCartButton";
+import { KitCard } from "../../components/KitCard";
+import { ProductAddToCart } from "../../components/ProductAddToCart";
 import { prisma } from "@/lib/prisma";
 import type { ProductPageProps } from "@/types/types";
 
@@ -10,19 +12,31 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   const product = await prisma.product.findFirst({
     where: { id: slug },
-    include: { category: true },
+    include: {
+      category: true,
+      sizes: { where: { archived: false }, orderBy: { position: "asc" } },
+      packPrices: true,
+    },
   });
 
-  if (!product) {
-    notFound();
-  }
+  if (!product) notFound();
+
+  // Kits qui incluent ce produit — suggérés en bas de fiche.
+  const kitsContainingProduct = await prisma.kit.findMany({
+    where: { archived: false, items: { some: { productId: product.id } } },
+    include: {
+      items: {
+        include: {
+          product: { select: { id: true, name: true, stock: true } },
+          productSize: { select: { id: true, label: true, stock: true } },
+        },
+      },
+    },
+  });
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
   const getCatalogPath = (imageName: string) => {
-    if (imageName.startsWith("/")) {
-      return imageName;
-    }
-
+    if (imageName.startsWith("/")) return imageName;
     const encodedName = encodeURIComponent(imageName);
     return supabaseUrl
       ? `${supabaseUrl}/storage/v1/object/public/catalogue/${encodedName}`
@@ -30,7 +44,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
   };
 
   const galleryImages = product.images.length > 0 ? product.images : ["/catalogue/placeholder.png"];
-  const formattedPrice = `${product.price.toLocaleString("fr-GN")} GNF`;
+  const hasSizes = product.sizes.length > 0;
+  const displayPrice = hasSizes ? Math.min(...product.sizes.map((s) => s.price)) : product.price;
+  const totalStock = hasSizes ? product.sizes.reduce((sum, s) => sum + s.stock, 0) : product.stock;
+  const formattedPrice = `${hasSizes ? "Dès " : ""}${displayPrice.toLocaleString("fr-GN")} GNF`;
 
   return (
     <div className="min-h-screen bg-[var(--color-cream)] text-[var(--foreground)]">
@@ -59,7 +76,6 @@ export default async function ProductPage({ params }: ProductPageProps) {
               </div>
             ))}
           </div>
-
           <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-2">
             {galleryImages.map((_, index) => (
               <span
@@ -80,7 +96,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
             </div>
             <div className="text-right">
               <p className="font-serif text-3xl text-[var(--color-accent)]">{formattedPrice}</p>
-              <p className="text-sm text-[var(--color-muted)]">{product.stock > 0 ? "En stock" : "Rupture"}</p>
+              <p className="text-sm text-[var(--color-muted)]">{totalStock > 0 ? "En stock" : "Rupture"}</p>
             </div>
           </div>
 
@@ -99,9 +115,15 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </div>
 
           <div className="mb-8 space-y-3">
-            <AddToCartButton
+            <ProductAddToCart
               product={{ id: product.id, name: product.name, price: product.price }}
-              className="flex min-h-[56px] w-full items-center justify-center rounded-2xl bg-[var(--color-accent)] px-6 py-3 text-center text-sm font-medium text-white shadow-[0_10px_28px_rgba(107,31,42,0.2)] transition hover:opacity-95"
+              stock={product.stock}
+              sizes={product.sizes.map((s) => ({ id: s.id, label: s.label, price: s.price, stock: s.stock }))}
+              packPrices={product.packPrices.map((p) => ({
+                quantity: p.quantity,
+                price: p.price,
+                productSizeId: p.productSizeId,
+              }))}
             />
             <Link
               href="/"
@@ -111,6 +133,20 @@ export default async function ProductPage({ params }: ProductPageProps) {
             </Link>
           </div>
 
+          {kitsContainingProduct.length > 0 ? (
+            <div className="mb-8">
+              <h3 className="mb-3 font-serif text-xl text-[var(--color-accent)]">
+                Ce produit fait partie d&apos;un kit
+              </h3>
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {kitsContainingProduct.map((kit) => (
+                  <div key={kit.id} className="w-[160px] flex-none">
+                    <KitCard kit={kit} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </article>
       </main>
     </div>

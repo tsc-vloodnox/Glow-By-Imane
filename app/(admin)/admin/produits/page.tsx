@@ -17,6 +17,8 @@ export default async function AdminProduitsPage() {
       include: {
         category: { select: { id: true, name: true } },
         _count: { select: { orderItems: true } },
+        sizes: { orderBy: { position: "asc" } },
+        packPrices: { orderBy: { position: "asc" } },
       },
     }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),

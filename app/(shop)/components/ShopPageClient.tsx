@@ -3,29 +3,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { FavoritesCarousel } from "./FavoritesCarousel";
+import { KitsCarousel } from "./KitsCarousel";
 import { ProductCard } from "./ProductCard";
 import { ShopSearchFilterBar } from "./ShopSearchFilterBar";
+import type { KitWithItems, ProductWithPricing } from "@/types/types";
 
-type ProductWithCategory = {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  stock: number;
-  images: string[];
-  category: { id: string; name: string };
-};
+// Product tel que reçu côté client : createdAt est sérialisé en string par Next.js
+// à la frontière Server Component -> Client Component.
+type ShopProduct = Omit<ProductWithPricing, "createdAt"> & { createdAt: string | Date };
 
 type CategoryItem = { id: string; label: string };
 
 type ShopPageClientProps = {
-  products: ProductWithCategory[];
+  products: ShopProduct[];
   categories: CategoryItem[];
+  kits: KitWithItems[];
 };
 
 const HERO_FADE_DISTANCE = 280; // px de scroll pour que le hero disparaisse complètement
 
-export function ShopPageClient({ products, categories }: ShopPageClientProps) {
+export function ShopPageClient({ products, categories, kits }: ShopPageClientProps) {
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [heroOpacity, setHeroOpacity] = useState(1);
@@ -47,6 +45,11 @@ export function ShopPageClient({ products, categories }: ShopPageClientProps) {
       cancelAnimationFrame(frame);
     };
   }, []);
+
+  const favoriteProducts = useMemo(
+    () => products.filter((product) => product.favorite),
+    [products],
+  );
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -123,6 +126,8 @@ export function ShopPageClient({ products, categories }: ShopPageClientProps) {
         </div>
       </section>
 
+      <FavoritesCarousel products={favoriteProducts} />
+
       <ShopSearchFilterBar
         categories={categories}
         activeCategory={activeCategory}
@@ -154,7 +159,7 @@ export function ShopPageClient({ products, categories }: ShopPageClientProps) {
                   ))}
                 </div>
               </div>
-            ))}
+            ))} 
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
@@ -164,6 +169,8 @@ export function ShopPageClient({ products, categories }: ShopPageClientProps) {
           </div>
         )}
       </section>
+
+      <KitsCarousel kits={kits} />
 
       <section className="mt-8 px-4 grid grid-cols-2 gap-3">
         <div className="flex items-center gap-2 rounded-xl bg-[var(--color-blush)] p-3">

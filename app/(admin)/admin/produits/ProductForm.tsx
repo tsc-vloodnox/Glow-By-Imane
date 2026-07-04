@@ -7,6 +7,25 @@ import { useState } from "react";
 import { createProduct, updateProduct } from "../actions";
 import { uploadProductImage } from "./upload";
 
+type SizeInput = {
+  id: string; // id réel si existant, "tmp_..." si pas encore enregistré
+  label: string;
+  price: number;
+  stock: number;
+  archived: boolean;
+};
+
+type PackPriceInput = {
+  id: string;
+  quantity: number;
+  price: number;
+  productSizeId: string | null; // null = s'applique au produit entier
+};
+
+function newTempId() {
+  return `tmp_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
 // URL publique du bucket — passée en prop depuis le Server Component parent
 type ProductFormProps = {
   categories: { id: string; name: string }[];
@@ -20,6 +39,8 @@ type ProductFormProps = {
     favorite: boolean;
     images: string[];
     categoryId: string;
+    sizes?: SizeInput[];
+    packPrices?: PackPriceInput[];
   };
 };
 
@@ -29,6 +50,10 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
   const [error, setError] = useState<string | null>(null);
   const [uploadedImages, setUploadedImages] = useState<string[]>(product?.images ?? []);
   const [uploadProgress, setUploadProgress] = useState<string>("");
+  const [sizes, setSizes] = useState<SizeInput[]>(
+    (product?.sizes ?? []).filter((s) => !s.archived),
+  );
+  const [packPrices, setPackPrices] = useState<PackPriceInput[]>(product?.packPrices ?? []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +62,33 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
 
     const formData = new FormData(event.currentTarget);
     formData.set("images", uploadedImages.join("\n"));
+    formData.set(
+      "sizes",
+      JSON.stringify(
+        sizes
+          .filter((s) => s.label.trim())
+          .map((s) => ({
+            id: s.id.startsWith("tmp_") ? undefined : s.id,
+            label: s.label.trim(),
+            price: s.price,
+            stock: s.stock,
+            archived: s.archived,
+          })),
+      ),
+    );
+    formData.set(
+      "packPrices",
+      JSON.stringify(
+        packPrices
+          .filter((p) => p.quantity > 0 && p.price > 0)
+          .map((p) => ({
+            id: p.id.startsWith("tmp_") ? undefined : p.id,
+            quantity: p.quantity,
+            price: p.price,
+            productSizeId: p.productSizeId,
+          })),
+      ),
+    );
 
     try {
       if (product) {
@@ -89,6 +141,47 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
     });
   }
 
+  // ─── Tailles ────────────────────────────────────────────────────────────
+
+  function addSize() {
+    setSizes((prev) => [
+      ...prev,
+      { id: newTempId(), label: "", price: 0, stock: 0, archived: false },
+    ]);
+  }
+
+  function updateSize(sizeId: string, field: "label" | "price" | "stock", value: string | number) {
+    setSizes((prev) => prev.map((s) => (s.id === sizeId ? { ...s, [field]: value } : s)));
+  }
+
+  function removeSize(sizeId: string) {
+    setSizes((prev) => prev.filter((s) => s.id !== sizeId));
+    setPackPrices((prev) =>
+      prev.map((p) => (p.productSizeId === sizeId ? { ...p, productSizeId: null } : p)),
+    );
+  }
+
+  // ─── Paliers de quantité ────────────────────────────────────────────────
+
+  function addPackPrice() {
+    setPackPrices((prev) => [
+      ...prev,
+      { id: newTempId(), quantity: 1, price: 0, productSizeId: null },
+    ]);
+  }
+
+  function updatePackPrice(
+    packId: string,
+    field: "quantity" | "price" | "productSizeId",
+    value: string | number | null,
+  ) {
+    setPackPrices((prev) => prev.map((p) => (p.id === packId ? { ...p, [field]: value } : p)));
+  }
+
+  function removePackPrice(packId: string) {
+    setPackPrices((prev) => prev.filter((p) => p.id !== packId));
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
@@ -122,7 +215,9 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
 
       <div className="grid gap-4 md:grid-cols-3">
         <label className="block space-y-1">
-          <span className="text-sm font-medium">Prix (GNF)</span>
+          <span className="text-sm font-medium">
+            {sizes.length > 0 ? "Prix (défaut)" : "Prix (GNF)"}
+          </span>
           <input
             name="price"
             type="number"
@@ -134,7 +229,9 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
         </label>
 
         <label className="block space-y-1">
-          <span className="text-sm font-medium">Stock</span>
+          <span className="text-sm font-medium">
+            {sizes.length > 0 ? "Stock (défaut)" : "Stock"}
+          </span>
           <input
             name="stock"
             type="number"
@@ -159,6 +256,140 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
             ))}
           </select>
         </label>
+      </div>
+      {sizes.length > 0 && (
+        <p className="-mt-2 text-xs text-[var(--color-muted)]">
+          Ce produit a des tailles : le prix/stock ci-dessus ne sert que de valeur par défaut.
+        </p>
+      )}
+
+      {/* Déclinaisons & paliers de prix */}
+      <div className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-sand)] p-4">
+        {/* Déclinaisons (tailles) */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Déclinaisons (tailles / contenances)</p>
+              <p className="text-xs text-[var(--color-muted)]">
+                Laissez vide si ce produit n&apos;a qu&apos;un seul prix.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addSize}
+              className="shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline"
+            >
+              + Ajouter une taille
+            </button>
+          </div>
+
+          {sizes.length > 0 && (
+            <div className="space-y-2">
+              {sizes.map((size) => (
+                <div
+                  key={size.id}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                >
+                  <input
+                    value={size.label}
+                    onChange={(e) => updateSize(size.id, "label", e.target.value)}
+                    placeholder="ex: 30ml"
+                    className="w-28 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={size.price}
+                    onChange={(e) => updateSize(size.id, "price", Number(e.target.value))}
+                    placeholder="Prix"
+                    className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={size.stock}
+                    onChange={(e) => updateSize(size.id, "stock", Number(e.target.value))}
+                    placeholder="Stock"
+                    className="w-20 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeSize(size.id)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                  >
+                    Retirer
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Paliers de quantité */}
+        <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Paliers de quantité</p>
+              <p className="text-xs text-[var(--color-muted)]">ex : 3 pour 100 000 GNF au lieu du prix unitaire ×3.</p>
+            </div>
+            <button
+              type="button"
+              onClick={addPackPrice}
+              className="shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline"
+            >
+              + Ajouter un palier
+            </button>
+          </div>
+
+          {packPrices.length > 0 && (
+            <div className="space-y-2">
+              {packPrices.map((pack) => (
+                <div
+                  key={pack.id}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                >
+                  <input
+                    type="number"
+                    min="1"
+                    value={pack.quantity}
+                    onChange={(e) => updatePackPrice(pack.id, "quantity", Number(e.target.value))}
+                    placeholder="Qté"
+                    className="w-16 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                  />
+                  <span className="text-xs text-[var(--color-muted)]">pour</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={pack.price}
+                    onChange={(e) => updatePackPrice(pack.id, "price", Number(e.target.value))}
+                    placeholder="Prix total"
+                    className="w-28 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                  />
+                  <span className="text-xs text-[var(--color-muted)]">GNF</span>
+                  {sizes.length > 0 && (
+                    <select
+                      value={pack.productSizeId ?? ""}
+                      onChange={(e) => updatePackPrice(pack.id, "productSizeId", e.target.value || null)}
+                      className="rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Produit entier</option>
+                      {sizes.map((s) => (
+                        <option key={s.id} value={s.id}>{s.label || "(sans nom)"}</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removePackPrice(pack.id)}
+                    className="ml-auto text-xs text-red-500 hover:text-red-700"
+                  >
+                    Retirer
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Images */}

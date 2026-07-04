@@ -1,9 +1,9 @@
-// Destination : app/(shop)/panier/CartPageClient.tsx
 "use client";
 
 import Link from "next/link";
 
 import { useCart } from "../CartContext";
+import { resolveLineTotal, resolveUnitPrice } from "@/lib/pricing";
 
 export default function CartPageClient() {
   const { items, total, updateQuantity, removeItem, clear } = useCart();
@@ -16,9 +16,7 @@ export default function CartPageClient() {
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Vider tout le panier ?")) {
-                clear();
-              }
+              if (window.confirm("Vider tout le panier ?")) clear();
             }}
             className="text-sm text-[var(--color-muted)]"
           >
@@ -35,18 +33,28 @@ export default function CartPageClient() {
         <div className="space-y-3">
           {items.map((item) => {
             const atMax = item.quantity >= item.stock;
+            const lineTotal = resolveLineTotal(item.basePrice, item.packPrices, item.quantity);
+            const unitPrice = resolveUnitPrice(item.basePrice, item.packPrices, item.quantity);
+
             return (
-              <div key={item.productId} className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
+              <div key={item.cartKey} className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-[var(--color-foreground)]">{item.name}</h2>
+                    <h2 className="text-sm font-semibold text-[var(--color-foreground)]">
+                      {item.name}
+                      {item.kind === "kit" ? (
+                        <span className="ml-2 rounded-full bg-[var(--color-blush)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-accent)]">
+                          Kit
+                        </span>
+                      ) : null}
+                    </h2>
                     <p className="mt-1 text-sm text-[var(--color-accent)]">
-                      {(item.price * item.quantity).toLocaleString("fr-GN")} GNF
+                      {lineTotal.toLocaleString("fr-GN")} GNF
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeItem(item.productId)}
+                    onClick={() => removeItem(item.cartKey)}
                     className="text-xs text-[var(--color-muted)]"
                   >
                     Retirer
@@ -57,7 +65,7 @@ export default function CartPageClient() {
                   <div className="flex items-center gap-3 rounded-full border border-[var(--color-border)] px-2 py-1">
                     <button
                       type="button"
-                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                      onClick={() => updateQuantity(item.cartKey, item.quantity - 1)}
                       disabled={item.quantity <= 1}
                       aria-label="Diminuer la quantité"
                       className="flex h-7 w-7 items-center justify-center rounded-full text-base text-[var(--color-accent)] disabled:opacity-30"
@@ -67,7 +75,7 @@ export default function CartPageClient() {
                     <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
                     <button
                       type="button"
-                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                      onClick={() => updateQuantity(item.cartKey, item.quantity + 1)}
                       disabled={atMax}
                       aria-label="Augmenter la quantité"
                       className="flex h-7 w-7 items-center justify-center rounded-full text-base text-[var(--color-accent)] disabled:opacity-30"
@@ -76,7 +84,7 @@ export default function CartPageClient() {
                     </button>
                   </div>
                   <span className="text-sm text-[var(--color-muted)]">
-                    {item.price.toLocaleString("fr-GN")} GNF / unité
+                    {unitPrice.toLocaleString("fr-GN")} GNF / unité
                   </span>
                 </div>
 
