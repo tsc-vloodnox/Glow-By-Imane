@@ -7,6 +7,19 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 
+// ─── Helpers revalidation ────────────────────────────────────────────────────
+
+/**
+ * Invalide toutes les pages du catalogue public qui affichent des produits/kits.
+ * À appeler après toute mutation produit ou kit.
+ */
+function revalidateCatalogue() {
+  revalidatePath("/", "layout");        // layout racine (nav, panier…)
+  revalidatePath("/");                  // page d'accueil
+  revalidatePath("/produits");          // liste catalogue
+  revalidatePath("/kits");              // liste kits si elle existe
+}
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export async function requireAdmin() {
@@ -181,6 +194,7 @@ export async function createProduct(formData: FormData) {
   await syncPackPrices(product.id, packPrices, sizeTempIdMap);
 
   revalidatePath("/admin/produits");
+  revalidateCatalogue();
 
   return prisma.product.findUniqueOrThrow({
     where: { id: product.id },
@@ -197,6 +211,9 @@ export async function updateProduct(productId: string, formData: FormData) {
   await syncPackPrices(productId, packPrices, sizeTempIdMap);
 
   revalidatePath("/admin/produits");
+  revalidateCatalogue();
+  // Invalide aussi la page produit individuelle
+  revalidatePath(`/produits/${productId}`);
 
   return prisma.product.findUniqueOrThrow({
     where: { id: productId },
@@ -215,6 +232,7 @@ export async function archiveProduct(productId: string) {
     data: { archived: true, favorite: false },
   });
   revalidatePath("/admin/produits");
+  revalidateCatalogue();
 }
 
 /**
@@ -227,6 +245,7 @@ export async function restoreProduct(productId: string) {
     data: { archived: false },
   });
   revalidatePath("/admin/produits");
+  revalidateCatalogue();
 }
 
 /**
@@ -244,6 +263,7 @@ export async function deleteProduct(productId: string) {
 
   await prisma.product.delete({ where: { id: productId } });
   revalidatePath("/admin/produits");
+  revalidateCatalogue();
 }
 
 // ─── Kits ────────────────────────────────────────────────────────────────────
@@ -320,6 +340,7 @@ export async function createKit(formData: FormData) {
   await syncKitItems(kit.id, items);
 
   revalidatePath("/admin/kits");
+  revalidateCatalogue();
 
   return prisma.kit.findUniqueOrThrow({
     where: { id: kit.id },
@@ -335,6 +356,7 @@ export async function updateKit(kitId: string, formData: FormData) {
   await syncKitItems(kitId, items);
 
   revalidatePath("/admin/kits");
+  revalidateCatalogue();
 
   return prisma.kit.findUniqueOrThrow({
     where: { id: kitId },
@@ -349,6 +371,7 @@ export async function archiveKit(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: true } });
   revalidatePath("/admin/kits");
+  revalidateCatalogue();
 }
 
 /**
@@ -358,6 +381,7 @@ export async function restoreKit(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: false } });
   revalidatePath("/admin/kits");
+  revalidateCatalogue();
 }
 
 /**
@@ -374,6 +398,7 @@ export async function deleteKit(kitId: string) {
   await prisma.kitItem.deleteMany({ where: { kitId } });
   await prisma.kit.delete({ where: { id: kitId } });
   revalidatePath("/admin/kits");
+  revalidateCatalogue();
 }
 
 // ─── Livraisons ───────────────────────────────────────────────────────────────
