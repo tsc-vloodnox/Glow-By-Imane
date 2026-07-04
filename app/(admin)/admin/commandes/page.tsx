@@ -105,7 +105,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
             const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
             const itemSummary = order.items
               .slice(0, 2)
-              .map((i) => `${i.quantity}× ${i.product.name}`)
+              .map((i) => `${i.quantity}× ${i.product?.name ?? "Produit supprimé"}`)
               .join(", ");
             const moreItems = order.items.length > 2 ? ` +${order.items.length - 2}` : "";
 
