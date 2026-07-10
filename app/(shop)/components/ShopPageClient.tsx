@@ -11,7 +11,9 @@ import type { KitWithItems, ProductWithPricing } from "@/types/types";
 
 // Product tel que reçu côté client : createdAt est sérialisé en string par Next.js
 // à la frontière Server Component -> Client Component.
-type ShopProduct = Omit<ProductWithPricing, "createdAt"> & { createdAt: string | Date };
+type ShopProduct = Omit<ProductWithPricing, "createdAt"> & {
+  createdAt: string | Date;
+};
 
 type CategoryItem = { id: string; label: string };
 
@@ -23,7 +25,11 @@ type ShopPageClientProps = {
 
 const HERO_FADE_DISTANCE = 280; // px de scroll pour que le hero disparaisse complètement
 
-export function ShopPageClient({ products, categories, kits }: ShopPageClientProps) {
+export function ShopPageClient({
+  products,
+  categories,
+  kits,
+}: ShopPageClientProps) {
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [heroOpacity, setHeroOpacity] = useState(1);
@@ -98,15 +104,17 @@ export function ShopPageClient({ products, categories, kits }: ShopPageClientPro
                 "linear-gradient(135deg, #8B1A3A 0%, #C4637B 40%, #EDE3DC 100%)",
             }}
           />
-          {/* Image décorative à gauche — blanc/doré, fondue dans le dégradé via un masque
-              qui estompe son bord droit (et un peu le bas) pour qu'elle se fonde
-              naturellement plutôt que de "flotter" au-dessus du fond. */}
           <img
             src="/hero-illustration.png"
             alt=""
             aria-hidden="true"
-            className="absolute right-0 bottom-0 top-0 h-full w-full object-contain object-right opacity-90 max-md:hidden"
-
+            className="absolute inset-0 h-full w-full object-cover object-right opacity-20 md:object-contain md:opacity-90"
+            style={{
+              maskImage:
+                "linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,1) 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,1) 100%)",
+            }}
           />
 
           <span className="absolute top-5 left-5 z-10 font-serif italic text-lg tracking-wide text-[var(--color-gold)] drop-shadow-sm">
@@ -159,7 +167,7 @@ export function ShopPageClient({ products, categories, kits }: ShopPageClientPro
                   ))}
                 </div>
               </div>
-            ))} 
+            ))}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
