@@ -38,12 +38,28 @@ export function BulkDeleteOrders() {
 
   if (step === "idle") {
     return (
-      <button
+<button
         type="button"
         onClick={() => setStep("confirm1")}
-        className="text-sm text-red-500 hover:text-red-700"
+        className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-700"
       >
-        Suppression en masse…
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          {/* Poignée */}
+          <path d="M5.5 1.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          {/* Couvercle */}
+          <path d="M2 3.5h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          {/* Corps */}
+          <path d="M3 3.5l.8 9.5a1 1 0 001 .9h6.4a1 1 0 001-.9l.8-9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          {/* Croix */}
+          <path d="M6 6.5l4 4M10 6.5l-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        </svg>
+        {/* Suppression en masse… */}
       </button>
     );
   }

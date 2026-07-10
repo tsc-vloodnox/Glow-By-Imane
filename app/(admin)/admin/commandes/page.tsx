@@ -5,7 +5,6 @@ import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
 import { requireAdmin } from "../actions";
 import { BulkDeleteOrders } from "./BulkDeleteOrders";
 
-// Statuts affichés dans les onglets de filtre (dans l'ordre du workflow)
 const FILTER_STATUSES: Array<OrderStatus | "TOUTES"> = [
   "TOUTES",
   "NOUVELLE",
@@ -38,7 +37,6 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
     },
   });
 
-  // Compte par statut pour les badges dans les tabs
   const counts = await prisma.order.groupBy({
     by: ["status"],
     _count: true,
@@ -48,26 +46,29 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header — empile sur très petit écran */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Commandes</h1>
           <p className="text-sm text-[var(--color-muted)]">
             {totalCount} commande{totalCount > 1 ? "s" : ""} au total
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* BulkDeleteOrders reste discret sur mobile — icône seule si tu veux
+              aller plus loin, mais en attendant on réduit juste le padding */}
           <BulkDeleteOrders />
           <Link
             href="/admin/commandes/new"
-            className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+            className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white whitespace-nowrap"
           >
             + Nouvelle
           </Link>
         </div>
       </div>
 
-      {/* Filtres statut — scroll horizontal sur mobile */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+      {/* Filtres — scroll horizontal, masque la scrollbar visuellement */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {FILTER_STATUSES.map((s) => {
           const isActive = s === activeFilter;
           const count = s === "TOUTES" ? totalCount : (countMap[s] ?? 0);
@@ -80,7 +81,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                 isActive
                   ? "bg-[var(--color-accent)] text-white"
-                  : "bg-white border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+                  : "border border-[var(--color-border)] bg-white text-[var(--color-muted)] hover:text-[var(--color-accent)]"
               }`}
             >
               {label}
@@ -113,13 +114,16 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
               <Link
                 key={order.id}
                 href={`/admin/commandes/${order.id}`}
-                className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-white px-4 py-3.5 transition-colors hover:border-[var(--color-accent)]"
+                className="flex items-start justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-white px-4 py-3.5 transition-colors hover:border-[var(--color-accent)]"
               >
-                {/* Numéro + client */}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                {/* Gauche : numéro + client + articles */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span className="font-medium">#{order.number}</span>
-                    <span className="text-sm text-[var(--color-muted)]">{order.name}</span>
+                    {/* Nom tronqué sur mobile, plein sur sm+ */}
+                    <span className="max-w-[120px] truncate text-sm text-[var(--color-muted)] sm:max-w-none">
+                      {order.name}
+                    </span>
                     <span className="hidden text-xs text-[var(--color-muted)] sm:inline">
                       · {order.quartier}
                     </span>
@@ -127,25 +131,28 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
                   <p className="mt-0.5 truncate text-xs text-[var(--color-muted)]">
                     {itemSummary}{moreItems}
                   </p>
+                  {/* Quartier visible sur mobile sous le nom, caché sur sm+ */}
+                  <p className="mt-0.5 text-xs text-[var(--color-muted)] sm:hidden">
+                    {order.quartier}
+                  </p>
                 </div>
 
-                {/* Droite : total + statuts */}
+                {/* Droite : total + badges empilés proprement */}
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
-                  <span className="text-sm font-medium">
+                  <span className="text-sm font-medium tabular-nums">
                     {order.estimatedTotal.toLocaleString("fr-GN")} GNF
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    {/* Badge statut livraison si existant */}
+                  <div className="flex flex-wrap justify-end gap-1">
                     {order.delivery && (
-                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700">
+                      <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 whitespace-nowrap">
                         {order.delivery.status === "LIVREE"
                           ? "Livrée ✓"
                           : order.delivery.scheduledAt
                           ? `Livr. ${new Date(order.delivery.scheduledAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`
-                          : "Livraison planifiée"}
+                          : "Planifiée"}
                       </span>
                     )}
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusCfg.color}`}>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${statusCfg.color}`}>
                       {statusCfg.label}
                     </span>
                   </div>

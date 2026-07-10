@@ -44,7 +44,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </aside>
 
         {/* Contenu principal — padding bottom sur mobile pour laisser place à la nav */}
-        <main className="flex-1 p-6 pb-28 md:pb-6">{children}</main>
+        <main className="min-w-0 flex-1 p-6 pb-28 md:pb-6">{children}</main>
       </div>
 
       {/* Nav mobile flottante */}
