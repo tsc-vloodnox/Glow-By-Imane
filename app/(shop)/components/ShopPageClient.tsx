@@ -117,7 +117,7 @@ export function ShopPageClient({
             }}
           />
 
-          <span className="absolute top-5 left-5 z-10 font-serif italic text-lg tracking-wide text-[var(--color-gold)] drop-shadow-sm md:opacity-0 opacity-100">
+          <span className="absolute top-5 left-5 z-10 font-serif italic text-lg tracking-wide text-[var(--color-gold)] drop-shadow-sm md:opacity-100 opacity-0">
             Glow By Imane
           </span>
 
