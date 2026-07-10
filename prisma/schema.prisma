@@ -33,19 +33,20 @@ model Category {
 }
 
 model Product {
-  id          String      @id @default(cuid())
-  name        String
-  description String
-  price       Int
-  stock       Int         @default(0)
-  favorite    Boolean     @default(false)
-  archived    Boolean     @default(false)
-  images      String[]
-  categoryId  String
-  category    Category    @relation(fields: [categoryId], references: [id])
-  orderItems  OrderItem[]
-  createdAt   DateTime    @default(now())
-  updatedAt DateTime @updatedAt
+  id            String      @id @default(cuid())
+  name          String
+  description   String
+  price         Int
+  originalPrice Int?
+  stock         Int         @default(0)
+  favorite      Boolean     @default(false)
+  archived      Boolean     @default(false)
+  images        String[]
+  categoryId    String
+  category      Category    @relation(fields: [categoryId], references: [id])
+  orderItems    OrderItem[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime @updatedAt
 
   sizes      ProductSize[]
   packPrices ProductPackPrice[]
@@ -88,15 +89,16 @@ model ProductPackPrice {
 
 /// Kit / bundle de produits (ex: "kit soin visage complet").
 model Kit {
-  id          String      @id @default(cuid())
-  name        String
-  description String?
-  price       Int         // prix fixe du kit
-  images      String[]
-  archived    Boolean     @default(false)
-  items       KitItem[]
-  orderItems  OrderItem[]
-  createdAt   DateTime    @default(now())
+  id            String      @id @default(cuid())
+  name          String
+  description   String?
+  price         Int         // prix fixe du kit
+  originalPrice Int?
+  images        String[]
+  archived      Boolean     @default(false)
+  items         KitItem[]
+  orderItems    OrderItem[]
+  createdAt     DateTime    @default(now())
 }
 
 model KitItem {
