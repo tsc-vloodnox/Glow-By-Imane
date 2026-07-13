@@ -50,6 +50,7 @@ model Product {
 
   sizes      ProductSize[]
   packPrices ProductPackPrice[]
+  promotions  ProductPromotion[]
   kitItems   KitItem[]
 }
 
@@ -87,6 +88,28 @@ model ProductPackPrice {
   @@unique([productId, productSizeId, quantity])
 }
 
+model Promotion {
+  id          String    @id @default(cuid())
+  name        String                          // ex: "Soldes été 2026"
+  discountPercent Int                         // ex: 20 (pour -20%)
+  startAt     DateTime
+  endAt       DateTime
+  active      Boolean   @default(true)        // peut être désactivée manuellement
+  products    ProductPromotion[]
+  createdAt   DateTime  @default(now())
+}
+
+// Table de jointure — une promo peut couvrir plusieurs produits,
+// un produit peut avoir plusieurs promos (on applique la plus avantageuse)
+model ProductPromotion {
+  id          String    @id @default(cuid())
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, productId])
+}
 /// Kit / bundle de produits (ex: "kit soin visage complet").
 model Kit {
   id            String      @id @default(cuid())

@@ -11,6 +11,8 @@ const navItems = [
   { href: "/admin/dashboard", label: "Dashboard" },
   { href: "/admin/commandes", label: "Commandes" },
   { href: "/admin/produits", label: "Produits" },
+  { href: "/admin/categories", label: "Catégories" },
+  { href: "/admin/promotions", label: "Promotions" },
   { href: "/admin/livraisons", label: "Livraisons" },
   { href: "/admin/livreurs", label: "Livreurs" },
   { href: "/admin/kits", label: "Kits" },
@@ -38,16 +40,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             ))}
           </nav>
 
-          <div className="mt-auto pt-6 border-t border-[var(--color-border)]">
+          <div className="mt-auto border-t border-[var(--color-border)] pt-6">
             <LogoutButton />
           </div>
         </aside>
 
-        {/* Contenu principal — padding bottom sur mobile pour laisser place à la nav */}
         <main className="min-w-0 flex-1 p-6 pb-28 md:pb-6">{children}</main>
       </div>
 
-      {/* Nav mobile flottante */}
       <AdminMobileNav />
     </div>
   );

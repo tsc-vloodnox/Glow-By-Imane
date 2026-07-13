@@ -108,7 +108,7 @@ export function ShopPageClient({
             src="/hero-illustration.png"
             alt=""
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover object-right opacity-20 md:object-contain md:opacity-90"
+            className="absolute inset-0 md:inset-y-0 md:right-0 h-full w-full object-cover object-right opacity-20 md:object-contain md:opacity-90"
             style={{
               maskImage:
                 "linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,1) 100%)",

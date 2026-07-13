@@ -2,89 +2,45 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { KitCard } from "../../components/KitCard";
 import { ProductAddToCart } from "../../components/ProductAddToCart";
+import { ProductGallery } from "../../components/ProductGallery";
+import { PriceDisplay } from "../../components/PriceDisplay";
 import { prisma } from "@/lib/prisma";
 import type { ProductPageProps } from "@/types/types";
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params;
 
-  const product = await prisma.product.findFirst({
+  const product = await prisma.product.findUnique({
     where: { id: slug },
-    include: {
-      category: true,
-      sizes: { where: { archived: false }, orderBy: { position: "asc" } },
-      packPrices: true,
-    },
+    include: { category: true },
   });
 
-  if (!product) notFound();
+  if (!product) {
+    notFound();
+  }
 
-  // Kits qui incluent ce produit — suggérés en bas de fiche.
-  const kitsContainingProduct = await prisma.kit.findMany({
-    where: { archived: false, items: { some: { productId: product.id } } },
-    include: {
-      items: {
-        include: {
-          product: { select: { id: true, name: true, stock: true } },
-          productSize: { select: { id: true, label: true, stock: true } },
-        },
-      },
-    },
-  });
-
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
-  const getCatalogPath = (imageName: string) => {
-    if (imageName.startsWith("/")) return imageName;
-    const encodedName = encodeURIComponent(imageName);
-    return supabaseUrl
-      ? `${supabaseUrl}/storage/v1/object/public/catalogue/${encodedName}`
-      : `/catalogue/${encodedName}`;
-  };
-
-  const galleryImages = product.images.length > 0 ? product.images : ["/catalogue/placeholder.png"];
-  const hasSizes = product.sizes.length > 0;
-  const displayPrice = hasSizes ? Math.min(...product.sizes.map((s) => s.price)) : product.price;
-  const totalStock = hasSizes ? product.sizes.reduce((sum, s) => sum + s.stock, 0) : product.stock;
-  const formattedPrice = `${hasSizes ? "Dès " : ""}${displayPrice.toLocaleString("fr-GN")} GNF`;
+  const galleryImages = product.images.length > 0 ? product.images.slice(0, 3) : ["/catalogue/placeholder.png"];
+  const isOutOfStock = product.stock <= 0;
 
   return (
     <div className="min-h-screen bg-[var(--color-cream)] text-[var(--foreground)]">
-      <header className="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[var(--color-cream)]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
-          <Link href="/" className="rounded-full p-2 text-[var(--color-accent)] transition hover:bg-[var(--color-blush)]">
-            <span aria-hidden="true">←</span>
-          </Link>
-          <h1 className="text-lg font-semibold italic text-[var(--color-accent)]">Boutique Beauté</h1>
-          <Link href="/panier" className="rounded-full p-2 text-[var(--color-accent)] transition hover:bg-[var(--color-blush)]">
-            <span aria-hidden="true">🛒</span>
-          </Link>
-        </div>
-      </header>
+      {/*
+        Avant : cette page avait son propre header sticky (retour / titre / panier),
+        en double avec le header + nav déjà fournis par layout.tsx (logo, WhatsApp,
+        liens Accueil/Produits/Panier). On garde uniquement un retour discret
+        en overlay sur l'image, le reste de la navigation est géré globalement.
+      */}
+      <Link
+        href="/"
+        className="absolute left-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-[var(--color-accent)] shadow-md backdrop-blur"
+        aria-label="Retour à l'accueil"
+      >
+        <span aria-hidden="true">←</span>
+      </Link>
 
       <main className="pb-32">
-        <section className="relative">
-          <div className="flex snap-x snap-mandatory overflow-x-auto">
-            {galleryImages.map((imageName, index) => (
-              <div key={`${imageName}-${index}`} className="w-full flex-none snap-start">
-                <img
-                  src={getCatalogPath(imageName)}
-                  alt={`${product.name} ${index + 1}`}
-                  className="aspect-[4/5] h-full w-full object-cover"
-                />
-              </div>
-            ))}
-          </div>
-          <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-2">
-            {galleryImages.map((_, index) => (
-              <span
-                key={index}
-                className={`h-2.5 w-2.5 rounded-full ${index === 0 ? "bg-[var(--color-accent)]" : "bg-[var(--color-accent)]/25"}`}
-              />
-            ))}
-          </div>
-        </section>
+        <ProductGallery images={galleryImages} productName={product.name} />
 
         <article className="relative z-10 -mt-6 rounded-t-[32px] bg-[var(--color-cream)] px-5 pt-8 shadow-[0_-12px_40px_rgba(107,31,42,0.08)]">
           <div className="mb-4 flex items-start justify-between gap-4">
@@ -95,8 +51,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <h2 className="font-serif text-3xl text-[var(--color-accent)]">{product.name}</h2>
             </div>
             <div className="text-right">
-              <p className="font-serif text-3xl text-[var(--color-accent)]">{formattedPrice}</p>
-              <p className="text-sm text-[var(--color-muted)]">{totalStock > 0 ? "En stock" : "Rupture"}</p>
+              <PriceDisplay price={product.price} originalPrice={product.originalPrice} size="lg" />
+              <p className={`mt-1 text-sm ${isOutOfStock ? "text-red-500" : "text-[var(--color-muted)]"}`}>
+                {isOutOfStock ? "Rupture de stock" : "En stock"}
+              </p>
             </div>
           </div>
 
@@ -118,35 +76,14 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <ProductAddToCart
               product={{ id: product.id, name: product.name, price: product.price }}
               stock={product.stock}
-              sizes={product.sizes.map((s) => ({ id: s.id, label: s.label, price: s.price, stock: s.stock }))}
-              packPrices={product.packPrices.map((p) => ({
-                quantity: p.quantity,
-                price: p.price,
-                productSizeId: p.productSizeId,
-              }))}
             />
             <Link
-              href="/"
+              href="/produits"
               className="flex h-[52px] items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-accent)]"
             >
               Voir d&apos;autres produits
             </Link>
           </div>
-
-          {kitsContainingProduct.length > 0 ? (
-            <div className="mb-8">
-              <h3 className="mb-3 font-serif text-xl text-[var(--color-accent)]">
-                Ce produit fait partie d&apos;un kit
-              </h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {kitsContainingProduct.map((kit) => (
-                  <div key={kit.id} className="w-[160px] flex-none">
-                    <KitCard kit={kit} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </article>
       </main>
     </div>
