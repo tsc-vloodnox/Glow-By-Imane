@@ -1,6 +1,7 @@
 // Destination : lib/pricing.ts
 
 export type PackPriceRule = { quantity: number; price: number };
+export type ActivePromotion = { discountPercent: number };
 
 /**
  * Prix total pour une quantité donnée, paliers appliqués de façon gloutonne
@@ -65,18 +66,28 @@ export function hasDiscount(
  * - la remise permanente (originalPrice sur le produit)
  * - les promotions temporaires actives (table Promotion)
  *
+ * CORRECTIF : les deux pourcentages sont désormais calculés — et réappliqués —
+ * par rapport au même prix de référence (`originalPrice` s'il existe, sinon
+ * `price`). Avant, le pourcentage permanent était réappliqué sur `price`
+ * (déjà net de remise), ce qui provoquait une double remise. Avec ce calcul,
+ * quand la remise permanente l'emporte, le prix affiché retombe bien sur
+ * `price` (pas de double remise) ; quand une promo plus avantageuse existe,
+ * elle s'applique proprement au prix de référence.
+ *
  * On applique toujours la plus avantageuse pour le client.
  * Retourne null si aucune remise n'est applicable.
  */
 export function getEffectiveDiscount(
   price: number,
   originalPrice: number | null | undefined,
-  activePromotions: { discountPercent: number }[] = [],
+  activePromotions: ActivePromotion[] = [],
 ): { discountedPrice: number; discountPercent: number } | null {
-  const permanentPercent =
-    originalPrice && originalPrice > price
-      ? Math.round((1 - price / originalPrice) * 100)
-      : 0;
+  const hasPermanent = !!originalPrice && originalPrice > price;
+  const referencePrice = hasPermanent ? (originalPrice as number) : price;
+
+  const permanentPercent = hasPermanent
+    ? Math.round((1 - price / (originalPrice as number)) * 100)
+    : 0;
 
   const promoPercent =
     activePromotions.length > 0
@@ -88,6 +99,46 @@ export function getEffectiveDiscount(
 
   return {
     discountPercent: best,
-    discountedPrice: Math.round(price * (1 - best / 100)),
+    discountedPrice: Math.round(referencePrice * (1 - best / 100)),
   };
+}
+
+/**
+ * Prix unitaire réellement facturé côté panier/commande : `basePrice` (ex.
+ * product.price / kit.price) est déjà net de remise permanente — seule une
+ * promotion active vient réduire davantage ce prix ici.
+ */
+export function resolveActiveUnitPrice(
+  basePrice: number,
+  activePromotions: ActivePromotion[] = [],
+): number {
+  if (activePromotions.length === 0) return basePrice;
+  const promoPercent = Math.max(...activePromotions.map((p) => p.discountPercent));
+  if (promoPercent <= 0) return basePrice;
+  return Math.round(basePrice * (1 - promoPercent / 100));
+}
+
+/**
+ * Comme resolveLineTotal, mais applique d'abord la promotion active
+ * (si présente) sur le prix unitaire avant de résoudre les paliers de quantité.
+ */
+export function resolveDiscountedLineTotal(
+  basePrice: number,
+  activePromotions: ActivePromotion[],
+  packPrices: PackPriceRule[],
+  quantity: number,
+): number {
+  const unitPrice = resolveActiveUnitPrice(basePrice, activePromotions);
+  return resolveLineTotal(unitPrice, packPrices, quantity);
+}
+
+/** Prix unitaire moyen affiché, promotion active comprise. */
+export function resolveDiscountedUnitPrice(
+  basePrice: number,
+  activePromotions: ActivePromotion[],
+  packPrices: PackPriceRule[],
+  quantity: number,
+): number {
+  if (quantity <= 0) return resolveActiveUnitPrice(basePrice, activePromotions);
+  return Math.round(resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity) / quantity);
 }

@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 
 import { createOrder, refreshCartPrices } from "../actions";
 import { useCart } from "../CartContext";
-import { resolveLineTotal } from "@/lib/pricing";
+import { resolveDiscountedLineTotal } from "@/lib/pricing";
+import { trackPixelEvent } from "@/lib/fbpixel";
 
 const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
 
@@ -82,6 +83,10 @@ export default function CheckoutPageClient() {
 
     try {
       const redirectUrl = await createOrder(payload);
+      trackPixelEvent("Lead", {
+        value: total,
+        currency: "GNF",
+      });
       clear();
       window.location.href = redirectUrl;
     } catch (error) {
@@ -110,7 +115,12 @@ export default function CheckoutPageClient() {
           {items.map((item) => (
             <div key={item.cartKey} className="flex items-center justify-between">
               <span>{item.name} x{item.quantity}</span>
-              <span>{resolveLineTotal(item.basePrice, item.packPrices, item.quantity).toLocaleString("fr-GN")} GNF</span>
+              <span>
+                {resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity).toLocaleString(
+                  "fr-GN",
+                )}{" "}
+                GNF
+              </span>
             </div>
           ))}
         </div>

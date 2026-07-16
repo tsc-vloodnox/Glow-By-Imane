@@ -1,4 +1,4 @@
-import { resolveLineTotal, type PackPriceRule } from "./pricing";
+import { resolveDiscountedLineTotal, type ActivePromotion, type PackPriceRule } from "./pricing";
 
 export type CartItem = {
   cartKey: string; // productId | "productId:sizeId" | "kit:kitId"
@@ -8,7 +8,8 @@ export type CartItem = {
   kitId: string | null;
   name: string;
   sizeLabel: string | null;
-  basePrice: number; // prix unitaire à quantité 1 (ou prix fixe pour un kit)
+  basePrice: number; // prix net (remise permanente déjà appliquée), à quantité 1
+  activePromotions: ActivePromotion[]; // promotions temporaires actives, connues au moment de l'ajout
   packPrices: PackPriceRule[]; // vide pour un kit
   quantity: number;
   stock: number; // taille choisie, ou min du kit, connu au moment de l'ajout
@@ -33,7 +34,7 @@ export function getStoredCartItems(): CartItem[] {
     const parsed = JSON.parse(raw) as Partial<CartItem & { price: number }>[];
     if (!Array.isArray(parsed)) return [];
 
-    // Compatibilité paniers pré-tailles/kits (anciens items : productId/name/price/quantity/stock)
+    // Compatibilité paniers pré-tailles/kits/promotions (anciens items : productId/name/price/quantity/stock)
     return parsed
       .filter((item) => item && (item.productId || item.kitId))
       .map((item) => ({
@@ -49,6 +50,7 @@ export function getStoredCartItems(): CartItem[] {
         name: item.name ?? "",
         sizeLabel: item.sizeLabel ?? null,
         basePrice: item.basePrice ?? item.price ?? 0,
+        activePromotions: item.activePromotions ?? [],
         packPrices: item.packPrices ?? [],
         quantity: item.quantity ?? 1,
         stock: typeof item.stock === "number" ? item.stock : FALLBACK_STOCK,
@@ -75,6 +77,7 @@ type AddProductInput = {
   sizeLabel?: string | null;
   name: string;
   basePrice: number;
+  activePromotions?: ActivePromotion[];
   packPrices?: PackPriceRule[];
   stock: number;
 };
@@ -84,6 +87,7 @@ type AddKitInput = {
   kitId: string;
   name: string;
   basePrice: number;
+  activePromotions?: ActivePromotion[];
   stock: number;
 };
 
@@ -97,7 +101,12 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
   const nextItems = existing
     ? items.map((item) =>
         item.cartKey === cartKey
-          ? { ...item, stock: input.stock, quantity: clamp(item.quantity + quantity, input.stock) }
+          ? {
+              ...item,
+              stock: input.stock,
+              activePromotions: input.activePromotions ?? item.activePromotions,
+              quantity: clamp(item.quantity + quantity, input.stock),
+            }
           : item,
       )
     : [
@@ -112,6 +121,7 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
               name: input.name,
               sizeLabel: null,
               basePrice: input.basePrice,
+              activePromotions: input.activePromotions ?? [],
               packPrices: [],
               quantity: clamp(quantity, input.stock),
               stock: input.stock,
@@ -125,6 +135,7 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
               name: input.name,
               sizeLabel: input.sizeLabel ?? null,
               basePrice: input.basePrice,
+              activePromotions: input.activePromotions ?? [],
               packPrices: input.packPrices ?? [],
               quantity: clamp(quantity, input.stock),
               stock: input.stock,
@@ -159,7 +170,10 @@ export function getCartCount() {
 }
 
 export function getCartTotal(items: CartItem[]) {
-  return items.reduce((sum, item) => sum + resolveLineTotal(item.basePrice, item.packPrices, item.quantity), 0);
+  return items.reduce(
+    (sum, item) => sum + resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity),
+    0,
+  );
 }
 
 function clamp(quantity: number, max: number) {

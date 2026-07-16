@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { useCart } from "../CartContext";
-import { resolveLineTotal, resolveUnitPrice } from "@/lib/pricing";
+import { resolveDiscountedLineTotal, resolveDiscountedUnitPrice } from "@/lib/pricing";
 
 export default function CartPageClient() {
   const { items, total, updateQuantity, removeItem, clear } = useCart();
@@ -33,8 +33,18 @@ export default function CartPageClient() {
         <div className="space-y-3">
           {items.map((item) => {
             const atMax = item.quantity >= item.stock;
-            const lineTotal = resolveLineTotal(item.basePrice, item.packPrices, item.quantity);
-            const unitPrice = resolveUnitPrice(item.basePrice, item.packPrices, item.quantity);
+            const lineTotal = resolveDiscountedLineTotal(
+              item.basePrice,
+              item.activePromotions,
+              item.packPrices,
+              item.quantity,
+            );
+            const unitPrice = resolveDiscountedUnitPrice(
+              item.basePrice,
+              item.activePromotions,
+              item.packPrices,
+              item.quantity,
+            );
 
             return (
               <div key={item.cartKey} className="rounded-2xl border border-[var(--color-border)] bg-white p-4 shadow-sm">

@@ -12,6 +12,8 @@ import {
   updateCartQuantity as updateCartQuantityStorage,
   type CartItem,
 } from "@/lib/cart";
+import type { ActivePromotion } from "@/lib/pricing";
+import { trackPixelEvent } from "@/lib/fbpixel";
 
 type AddProductArgs = {
   kind: "product";
@@ -20,6 +22,7 @@ type AddProductArgs = {
   sizeLabel?: string | null;
   name: string;
   basePrice: number;
+  activePromotions?: ActivePromotion[];
   packPrices?: { quantity: number; price: number }[];
   stock: number;
 };
@@ -29,6 +32,7 @@ type AddKitArgs = {
   kitId: string;
   name: string;
   basePrice: number;
+  activePromotions?: ActivePromotion[];
   stock: number;
 };
 
@@ -65,6 +69,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const addItem = useCallback<CartContextValue["addItem"]>((input, quantity = 1) => {
     setItems(addToCartStorage(input, quantity));
+    trackPixelEvent("AddToCart", {
+      content_ids: [input.kind === "product" ? input.productId : input.kitId],
+      content_name: input.name,
+      content_type: input.kind,
+      value: input.basePrice * quantity,
+      currency: "GNF",
+    });
   }, []);
 
   const updateQuantity = useCallback<CartContextValue["updateQuantity"]>((cartKey, quantity) => {

@@ -1,7 +1,7 @@
 // Destination : app/layout.tsx
 import type { Metadata, Viewport } from "next";
 import { Inter, Playfair_Display, Geist } from "next/font/google";
-
+import  MetaPixel  from "./MetaPixel";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
@@ -97,7 +97,11 @@ export default function RootLayout({
         geist.variable,
       )}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <MetaPixel />
+        {children}
+
+      </body>
     </html>
   );
 }
