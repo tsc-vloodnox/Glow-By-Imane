@@ -47,6 +47,7 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         alt: "Glow by Imane — Beauté & Accessoires",
+        type: "image/png",
       },
     ],
     locale: "fr_GN",
