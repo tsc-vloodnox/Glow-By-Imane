@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     siteName: "Glow by Imane",
     images: [
       {
-        url: "/og-image.jpg",
+        url: "/og-image.png",
         width: 1200,
         height: 630,
         alt: "Glow by Imane — Beauté & Accessoires",
@@ -57,7 +57,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Glow by Imane — Beauté & Accessoires",
     description: "Boutique en ligne à Conakry. Paiement à la livraison.",
-    images: ["/og-image.jpg"],
+    images: ["/og-image.png"],
   },
 
   robots: {
