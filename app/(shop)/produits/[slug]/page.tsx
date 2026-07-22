@@ -1,22 +1,65 @@
-// Destination : app/(shop)/produits/[slug]/page.tsx
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ProductAddToCart } from "../../components/ProductAddToCart";
 import { ProductViewTracker } from "../../components/ProductViewTracker";
-
 import { ProductGallery } from "../../components/ProductGallery";
 import { PriceDisplay } from "../../components/PriceDisplay";
 import { prisma } from "@/lib/prisma";
+import { catalogPath } from "@/lib/images";
 import type { ProductPageProps } from "@/types/types";
+
+// Fetch partagé pour ne pas appeler Prisma deux fois (generateMetadata + page)
+async function getProduct(slug: string) {
+  return prisma.product.findUnique({
+    where: { id: slug },
+    include: {
+      category: true,
+      promotions: { include: { promotion: true } },
+    },
+  });
+}
+
+export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const product = await getProduct(slug);
+
+  if (!product) return { title: "Produit introuvable" };
+
+  const imageUrl = catalogPath(product.images[0]);
+
+  return {
+    title: product.name,
+    description: product.description,
+    openGraph: {
+      title: `${product.name} | Glow by Imane`,
+      description: product.description,
+      url: `https://glowbyimane.com/produits/${product.id}`,
+      images: imageUrl
+        ? [
+            {
+              url: imageUrl,
+              width: 800,
+              height: 1000,
+              alt: product.name,
+            },
+          ]
+        : [],
+    },
+    // WhatsApp lit aussi twitter:image comme fallback
+    twitter: {
+      card: "summary_large_image",
+      title: product.name,
+      description: product.description,
+      images: imageUrl ? [imageUrl] : [],
+    },
+  };
+}
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params;
-
-  const product = await prisma.product.findUnique({
-    where: { id: slug },
-    include: { category: true, promotions: { include: { promotion: true } } },
-  });
+  const product = await getProduct(slug);
 
   if (!product) {
     notFound();
@@ -27,11 +70,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
       ? product.images.slice(0, 3)
       : ["/catalogue/placeholder.png"];
   const isOutOfStock = product.stock <= 0;
-  
-  // Extrait les pourcentages de remise des promotions actives reçues du serveur
+
   const activePromotions = (product.promotions ?? []).map((p) => ({
     discountPercent: p.promotion.discountPercent,
   }));
+
   return (
     <div className="min-h-screen bg-[var(--color-cream)] text-[var(--foreground)]">
       <Link
@@ -65,6 +108,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 price={product.price}
                 originalPrice={product.originalPrice}
                 activePromotions={activePromotions}
+                size="lg"
               />
               <p
                 className={`mt-1 text-sm ${isOutOfStock ? "text-red-500" : "text-[var(--color-muted)]"}`}
@@ -106,7 +150,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               stock={product.stock}
             />
             <Link
-              href="/produits"
+              href="/"
               className="flex h-[52px] items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-accent)]"
             >
               Voir d&apos;autres produits
