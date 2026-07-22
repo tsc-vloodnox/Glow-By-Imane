@@ -1,5 +1,6 @@
 "use client";
 
+import imageCompression from "browser-image-compression";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -8,7 +9,7 @@ import { createProduct, updateProduct } from "../actions";
 import { uploadProductImage } from "./upload";
 
 type SizeInput = {
-  id: string; // id réel si existant, "tmp_..." si pas encore enregistré
+  id: string;
   label: string;
   price: number;
   stock: number;
@@ -19,14 +20,13 @@ type PackPriceInput = {
   id: string;
   quantity: number;
   price: number;
-  productSizeId: string | null; // null = s'applique au produit entier
+  productSizeId: string | null;
 };
 
 function newTempId() {
   return `tmp_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
-// URL publique du bucket — passée en prop depuis le Server Component parent
 type ProductFormProps = {
   categories: { id: string; name: string }[];
   storageBaseUrl: string;
@@ -43,6 +43,25 @@ type ProductFormProps = {
     packPrices?: PackPriceInput[];
   };
 };
+
+// Compresse et convertit une image en WebP avant l'upload.
+// Cible : 1 Mo max, 1200px max — suffisant pour une fiche produit mobile.
+async function compressImage(file: File): Promise<File> {
+  try {
+    return await imageCompression(file, {
+      maxSizeMB: 1,
+      maxWidthOrHeight: 1200,
+      useWebWorker: true,
+      fileType: "image/webp",
+      // Fallback : si la compression dépasse 10s, on renvoie le fichier original
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    // En cas d'échec de compression (format exotique, timeout...)
+    // on envoie le fichier original plutôt que de bloquer l'upload
+    return file;
+  }
+}
 
 export function ProductForm({ categories, storageBaseUrl, product }: ProductFormProps) {
   const router = useRouter();
@@ -108,27 +127,45 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) return;
 
-    setUploadProgress(`Téléchargement de ${files.length} image${files.length > 1 ? "s" : ""}…`);
+    setError(null);
+    setUploadProgress(`Compression de ${files.length} image${files.length > 1 ? "s" : ""}…`);
 
-    try {
-      const results = await Promise.allSettled(files.map((file) => uploadProductImage(file)));
-      const uploaded = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-      const failures = results.filter((r) => r.status === "rejected").length;
+    // 1. Compression côté client en parallèle — réduit la taille avant envoi
+    //    et élimine les timeouts sur mobile (photo brute de 5-8 Mo → ~300-600 Ko)
+    const compressed = await Promise.all(files.map(compressImage));
 
-      if (uploaded.length > 0) setUploadedImages((prev) => [...prev, ...uploaded]);
-      if (failures > 0) setError(`${failures} image${failures > 1 ? "s" : ""} non téléchargée${failures > 1 ? "s" : ""}.`);
+    setUploadProgress(`Upload de ${compressed.length} image${compressed.length > 1 ? "s" : ""}…`);
 
-      setUploadProgress(
-        uploaded.length > 0
-          ? `${uploaded.length} image${uploaded.length > 1 ? "s" : ""} ajoutée${uploaded.length > 1 ? "s" : ""}.`
-          : "",
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec du téléchargement.");
-      setUploadProgress("");
-    } finally {
-      event.target.value = "";
+    // 2. Upload des fichiers compressés
+    const results = await Promise.allSettled(
+      compressed.map((file) => uploadProductImage(file)),
+    );
+
+    const uploaded = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const failures = results.filter((r) => r.status === "rejected");
+
+    if (uploaded.length > 0) {
+      setUploadedImages((prev) => [...prev, ...uploaded]);
     }
+
+    if (failures.length > 0) {
+      const firstError =
+        failures[0].status === "rejected" && failures[0].reason instanceof Error
+          ? failures[0].reason.message
+          : "Erreur inconnue";
+      setError(
+        `${failures.length} image${failures.length > 1 ? "s" : ""} non téléchargée${failures.length > 1 ? "s" : ""} : ${firstError}`,
+      );
+    }
+
+    setUploadProgress(
+      uploaded.length > 0
+        ? `${uploaded.length} image${uploaded.length > 1 ? "s" : ""} ajoutée${uploaded.length > 1 ? "s" : ""} ✓`
+        : "",
+    );
+
+    // Reset l'input pour permettre de re-sélectionner les mêmes fichiers
+    event.target.value = "";
   }
 
   function moveImage(index: number, direction: -1 | 1) {
@@ -265,7 +302,6 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
 
       {/* Déclinaisons & paliers de prix */}
       <div className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-sand)] p-4">
-        {/* Déclinaisons (tailles) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div>
@@ -325,12 +361,13 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
           )}
         </div>
 
-        {/* Paliers de quantité */}
         <div className="space-y-2 border-t border-[var(--color-border)] pt-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">Paliers de quantité</p>
-              <p className="text-xs text-[var(--color-muted)]">ex : 3 pour 100 000 GNF au lieu du prix unitaire ×3.</p>
+              <p className="text-xs text-[var(--color-muted)]">
+                ex : 3 pour 100 000 GNF au lieu du prix unitaire ×3.
+              </p>
             </div>
             <button
               type="button"
@@ -369,7 +406,9 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
                   {sizes.length > 0 && (
                     <select
                       value={pack.productSizeId ?? ""}
-                      onChange={(e) => updatePackPrice(pack.id, "productSizeId", e.target.value || null)}
+                      onChange={(e) =>
+                        updatePackPrice(pack.id, "productSizeId", e.target.value || null)
+                      }
                       className="rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
                     >
                       <option value="">Produit entier</option>
@@ -397,11 +436,11 @@ export function ProductForm({ categories, storageBaseUrl, product }: ProductForm
         <div>
           <p className="text-sm font-medium">Images</p>
           <p className="text-xs text-[var(--color-muted)]">
-            La première image sera utilisée comme miniature principale.
+            La première image sera utilisée comme miniature principale. Les images sont
+            automatiquement compressées avant l&apos;envoi.
           </p>
         </div>
 
-        {/* Grille de miniatures */}
         {uploadedImages.length > 0 && (
           <div className="flex flex-wrap gap-3">
             {uploadedImages.map((img, i) => (
