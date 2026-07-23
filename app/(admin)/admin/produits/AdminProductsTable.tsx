@@ -1,5 +1,6 @@
 "use client";
 
+import imageCompression from "browser-image-compression";
 import Image from "next/image";
 import { useState, useTransition } from "react";
 
@@ -47,6 +48,25 @@ type Filter = "actifs" | "archives";
 
 function newTempId() {
   return `tmp_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+// Compresse et convertit une image en WebP avant l'upload.
+// Cible : 1 Mo max, 1200px max — suffisant pour une fiche produit mobile.
+async function compressImage(file: File): Promise<File> {
+  try {
+    return await imageCompression(file, {
+      maxSizeMB: 1,
+      maxWidthOrHeight: 1200,
+      useWebWorker: true,
+      fileType: "image/webp",
+      // Fallback : si la compression dépasse 10s, on renvoie le fichier original
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    // En cas d'échec de compression (format exotique, timeout...)
+    // on envoie le fichier original plutôt que de bloquer l'upload
+    return file;
+  }
 }
 
 function normalizeSizes(sizes: ProductSizeRow[]) {
@@ -131,15 +151,30 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
   async function handleImageUpload(productId: string, files: FileList | null) {
     if (!files || files.length === 0) return;
     setUploadingId(productId);
+    setActionError(null);
     try {
-      const results = await Promise.allSettled(Array.from(files).map(uploadProductImage));
+      // 1. Compression côté client en parallèle — réduit la taille avant envoi
+      //    et élimine les timeouts sur mobile (photo brute de 5-8 Mo → ~300-600 Ko)
+      const compressed = await Promise.all(Array.from(files).map(compressImage));
+
+      // 2. Upload des fichiers compressés
+      const results = await Promise.allSettled(compressed.map(uploadProductImage));
       const uploaded = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       const product = products.find((p) => p.id === productId);
       if (product && uploaded.length > 0) {
         updateImages(productId, [...product.images, ...uploaded]);
       }
-      const failures = results.filter((r) => r.status === "rejected").length;
-      if (failures > 0) setActionError(`${failures} image(s) non téléchargée(s).`);
+
+      const failures = results.filter((r) => r.status === "rejected");
+      if (failures.length > 0) {
+        const firstError =
+          failures[0].status === "rejected" && failures[0].reason instanceof Error
+            ? failures[0].reason.message
+            : "Erreur inconnue";
+        setActionError(
+          `${failures.length} image${failures.length > 1 ? "s" : ""} non téléchargée${failures.length > 1 ? "s" : ""} : ${firstError}`,
+        );
+      }
     } catch {
       setActionError("Erreur lors du téléchargement des images.");
     } finally {
