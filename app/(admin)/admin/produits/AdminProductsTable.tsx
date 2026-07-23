@@ -2,6 +2,7 @@
 
 import imageCompression from "browser-image-compression";
 import Image from "next/image";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import { archiveProduct, deleteProduct, restoreProduct, updateProduct } from "../actions";
@@ -109,6 +110,17 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? { ...p, [field]: value } : p)),
     );
+  }
+
+  function handleEditNavigate(product: ProductRow, event: React.MouseEvent) {
+    if (isDirty(product)) {
+      const confirmed = window.confirm(
+        "Ce produit a des modifications non enregistrées. Ouvrir la page d'édition sans les enregistrer ?",
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    }
   }
 
   function isDirty(product: ProductRow) {
@@ -419,9 +431,9 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
       </div>
 
       {/* Barre de recherche + filtres */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {/* Recherche texte */}
-        <div className="relative flex-1 min-w-48">
+        <div className="relative w-full sm:flex-1 sm:min-w-48">
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[var(--color-muted)]">
             🔍
           </span>
@@ -430,7 +442,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
             placeholder="Rechercher un produit…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-[var(--color-border)] bg-white py-2 pl-9 pr-4 text-sm outline-none focus:border-[var(--color-accent)]"
+            className="w-full rounded-xl border border-[var(--color-border)] bg-white py-2.5 pl-9 pr-4 text-base outline-none focus:border-[var(--color-accent)] sm:py-2 sm:text-sm"
           />
         </div>
 
@@ -438,7 +450,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm text-[var(--color-muted)] outline-none focus:border-[var(--color-accent)]"
+          className="w-full rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-base text-[var(--color-muted)] outline-none focus:border-[var(--color-accent)] sm:w-auto sm:py-2 sm:text-sm"
         >
           <option value="">Toutes les catégories</option>
           {categories.map((c) => (
@@ -450,7 +462,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
         <select
           value={stockFilter}
           onChange={(e) => setStockFilter(e.target.value as "tous" | "rupture" | "bas")}
-          className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm text-[var(--color-muted)] outline-none focus:border-[var(--color-accent)]"
+          className="w-full rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-base text-[var(--color-muted)] outline-none focus:border-[var(--color-accent)] sm:w-auto sm:py-2 sm:text-sm"
         >
           <option value="tous">Tout le stock</option>
           <option value="bas">Stock bas (≤ 3)</option>
@@ -462,7 +474,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
           <button
             type="button"
             onClick={() => { setSearch(""); setCategoryFilter(""); setStockFilter("tous"); }}
-            className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm text-[var(--color-muted)] hover:text-red-500"
+            className="w-full rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-sm text-[var(--color-muted)] hover:text-red-500 sm:w-auto sm:py-2"
           >
             ✕ Réinitialiser
           </button>
@@ -512,8 +524,13 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  {/* Miniature */}
-                  <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-sand)]">
+                  {/* Miniature — lien vers la page d'édition dédiée */}
+                  <Link
+                    href={`/admin/produits/${product.id}/edit`}
+                    onClick={(e) => handleEditNavigate(product, e)}
+                    title="Ouvrir la page d'édition du produit"
+                    className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-sand)] transition-opacity hover:opacity-80"
+                  >
                     {thumbnail ? (
                       <Image
                         src={thumbnail}
@@ -527,7 +544,10 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                         🖼
                       </span>
                     )}
-                  </div>
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-transparent transition-colors group-hover:bg-black/30 group-hover:text-white">
+                      ✎
+                    </span>
+                  </Link>
 
                   <div className="flex-1 min-w-0">
                     {/* Nom + badges */}
@@ -563,7 +583,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                       onChange={(e) => updateField(product.id, "description", e.target.value)}
                       disabled={product.archived}
                       placeholder="Description"
-                      className="mt-2 w-full rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm disabled:bg-[var(--color-sand)]"
+                      className="mt-2 w-full rounded-lg border border-[var(--color-border)] px-3 py-2 text-base disabled:bg-[var(--color-sand)] sm:text-sm"
                     />
 
                     {/* Catégorie / Prix / Stock */}
@@ -572,7 +592,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                         value={product.categoryId}
                         onChange={(e) => updateField(product.id, "categoryId", e.target.value)}
                         disabled={product.archived}
-                        className="col-span-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm sm:col-span-1 disabled:bg-[var(--color-sand)]"
+                        className="col-span-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-base sm:col-span-1 sm:text-sm disabled:bg-[var(--color-sand)]"
                       >
                         {categories.map((c) => (
                           <option key={c.id} value={c.id}>{c.name}</option>
@@ -590,7 +610,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                           value={product.price}
                           onChange={(e) => updateField(product.id, "price", Number(e.target.value))}
                           disabled={product.archived}
-                          className="w-full min-w-0 bg-transparent outline-none disabled:text-[var(--color-muted)]"
+                          className="w-full min-w-0 bg-transparent text-base outline-none sm:text-sm disabled:text-[var(--color-muted)]"
                         />
                       </label>
 
@@ -605,7 +625,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                           value={product.stock}
                           onChange={(e) => updateField(product.id, "stock", Number(e.target.value))}
                           disabled={product.archived}
-                          className="w-full min-w-0 bg-transparent outline-none disabled:text-[var(--color-muted)]"
+                          className="w-full min-w-0 bg-transparent text-base outline-none sm:text-sm disabled:text-[var(--color-muted)]"
                         />
                       </label>
                     </div>
@@ -678,38 +698,42 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                                   {activeSizes.map((size) => (
                                     <div
                                       key={size.id}
-                                      className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                                      className="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2 sm:flex-row sm:flex-wrap sm:items-center"
                                     >
-                                      <input
-                                        value={size.label}
-                                        onChange={(e) => updateSize(product.id, size.id, "label", e.target.value)}
-                                        placeholder="ex: 30ml"
-                                        className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                      />
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={size.price}
-                                        onChange={(e) =>
-                                          updateSize(product.id, size.id, "price", Number(e.target.value))
-                                        }
-                                        placeholder="Prix"
-                                        className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                      />
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={size.stock}
-                                        onChange={(e) =>
-                                          updateSize(product.id, size.id, "stock", Number(e.target.value))
-                                        }
-                                        placeholder="Stock"
-                                        className="w-20 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                      />
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <input
+                                          value={size.label}
+                                          onChange={(e) => updateSize(product.id, size.id, "label", e.target.value)}
+                                          placeholder="ex: 30ml"
+                                          className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:text-sm"
+                                        />
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          inputMode="decimal"
+                                          value={size.price}
+                                          onChange={(e) =>
+                                            updateSize(product.id, size.id, "price", Number(e.target.value))
+                                          }
+                                          placeholder="Prix"
+                                          className="w-24 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:text-sm"
+                                        />
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          inputMode="numeric"
+                                          value={size.stock}
+                                          onChange={(e) =>
+                                            updateSize(product.id, size.id, "stock", Number(e.target.value))
+                                          }
+                                          placeholder="Stock"
+                                          className="w-20 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:text-sm"
+                                        />
+                                      </div>
                                       <button
                                         type="button"
                                         onClick={() => removeSize(product.id, size.id)}
-                                        className="ml-auto text-xs text-red-500 hover:text-red-700"
+                                        className="self-end text-xs text-red-500 hover:text-red-700 sm:ml-auto sm:self-auto"
                                       >
                                         Retirer
                                       </button>
@@ -743,53 +767,57 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                                   {product.packPrices.map((pack) => (
                                     <div
                                       key={pack.id}
-                                      className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                                      className="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2 sm:flex-row sm:flex-wrap sm:items-center"
                                     >
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        value={pack.quantity}
-                                        onChange={(e) =>
-                                          updatePackPrice(product.id, pack.id, "quantity", Number(e.target.value))
-                                        }
-                                        placeholder="Qté"
-                                        className="w-16 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                      />
-                                      <span className="text-xs text-[var(--color-muted)]">pour</span>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        value={pack.price}
-                                        onChange={(e) =>
-                                          updatePackPrice(product.id, pack.id, "price", Number(e.target.value))
-                                        }
-                                        placeholder="Prix total"
-                                        className="w-28 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                      />
-                                      <span className="text-xs text-[var(--color-muted)]">GNF</span>
-                                      {activeSizes.length > 0 && (
-                                        <select
-                                          value={pack.productSizeId ?? ""}
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          inputMode="numeric"
+                                          value={pack.quantity}
                                           onChange={(e) =>
-                                            updatePackPrice(
-                                              product.id,
-                                              pack.id,
-                                              "productSizeId",
-                                              e.target.value || null,
-                                            )
+                                            updatePackPrice(product.id, pack.id, "quantity", Number(e.target.value))
                                           }
-                                          className="rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
-                                        >
-                                          <option value="">Produit entier</option>
-                                          {activeSizes.map((s) => (
-                                            <option key={s.id} value={s.id}>{s.label}</option>
-                                          ))}
-                                        </select>
-                                      )}
+                                          placeholder="Qté"
+                                          className="w-16 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:text-sm"
+                                        />
+                                        <span className="text-xs text-[var(--color-muted)]">pour</span>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          inputMode="decimal"
+                                          value={pack.price}
+                                          onChange={(e) =>
+                                            updatePackPrice(product.id, pack.id, "price", Number(e.target.value))
+                                          }
+                                          placeholder="Prix total"
+                                          className="w-28 min-w-0 rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:text-sm"
+                                        />
+                                        <span className="text-xs text-[var(--color-muted)]">GNF</span>
+                                        {activeSizes.length > 0 && (
+                                          <select
+                                            value={pack.productSizeId ?? ""}
+                                            onChange={(e) =>
+                                              updatePackPrice(
+                                                product.id,
+                                                pack.id,
+                                                "productSizeId",
+                                                e.target.value || null,
+                                              )
+                                            }
+                                            className="w-full rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-base sm:w-auto sm:text-sm"
+                                          >
+                                            <option value="">Produit entier</option>
+                                            {activeSizes.map((s) => (
+                                              <option key={s.id} value={s.id}>{s.label}</option>
+                                            ))}
+                                          </select>
+                                        )}
+                                      </div>
                                       <button
                                         type="button"
                                         onClick={() => removePackPrice(product.id, pack.id)}
-                                        className="ml-auto text-xs text-red-500 hover:text-red-700"
+                                        className="self-end text-xs text-red-500 hover:text-red-700 sm:ml-auto sm:self-auto"
                                       >
                                         Retirer
                                       </button>
@@ -845,12 +873,12 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                                       )}
                                     </div>
                                     {/* Contrôles */}
-                                    <div className="mt-1 flex items-center justify-center gap-1">
+                                    <div className="mt-1 flex items-center justify-center gap-0.5">
                                       <button
                                         type="button"
                                         onClick={() => moveImage(product.id, i, -1)}
                                         disabled={i === 0}
-                                        className="text-xs text-[var(--color-muted)] disabled:opacity-20 hover:text-[var(--color-accent)]"
+                                        className="rounded-md p-1.5 text-sm text-[var(--color-muted)] disabled:opacity-20 hover:text-[var(--color-accent)]"
                                         title="Déplacer à gauche"
                                       >
                                         ←
@@ -858,7 +886,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                                       <button
                                         type="button"
                                         onClick={() => removeImage(product.id, i)}
-                                        className="text-xs text-red-400 hover:text-red-600"
+                                        className="rounded-md p-1.5 text-sm text-red-400 hover:text-red-600"
                                         title="Retirer"
                                       >
                                         ✕
@@ -867,7 +895,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                                         type="button"
                                         onClick={() => moveImage(product.id, i, 1)}
                                         disabled={i === product.images.length - 1}
-                                        className="text-xs text-[var(--color-muted)] disabled:opacity-20 hover:text-[var(--color-accent)]"
+                                        className="rounded-md p-1.5 text-sm text-[var(--color-muted)] disabled:opacity-20 hover:text-[var(--color-accent)]"
                                         title="Déplacer à droite"
                                       >
                                         →
