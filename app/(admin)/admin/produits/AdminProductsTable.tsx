@@ -557,7 +557,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                         onChange={(e) => updateField(product.id, "name", e.target.value)}
                         disabled={product.archived}
                         placeholder="Nom du produit"
-                        className="flex-1 rounded-lg border border-[var(--color-border)] px-3 py-2 text-base font-medium disabled:bg-[var(--color-sand)]"
+                        className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] px-3 py-2 text-base font-medium disabled:bg-[var(--color-sand)]"
                       />
                       {outOfStock && (
                         <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
