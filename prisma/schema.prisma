@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum OrderStatus {
+  NOUVELLE
+  DISCUSSION_WHATSAPP
+  CONFIRMEE
+  PREPARATION
+  EN_LIVRAISON
+  LIVREE
+  ANNULEE
+}
+
+enum DeliveryStatus {
+  PLANIFIEE
+  EN_COURS
+  LIVREE
+  ECHOUEE
+  REPORTEE
+}
+
+enum GiftCardStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String
+  products Product[]
+}
+
+model Product {
+  id            String      @id @default(cuid())
+  name          String
+  description   String
+  price         Int
+  originalPrice Int?
+  stock         Int         @default(0)
+  favorite      Boolean     @default(false)
+  archived      Boolean     @default(false)
+  images        String[]
+  categoryId    String
+  category      Category    @relation(fields: [categoryId], references: [id])
+  orderItems    OrderItem[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sizes      ProductSize[]
+  packPrices ProductPackPrice[]
+  promotions  ProductPromotion[]
+  kitItems   KitItem[]
+}
+
+/// Déclinaisons de contenance / taille (30ml, 50ml, 100ml...).
+/// Chaque taille a son propre prix et son propre stock.
+model ProductSize {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  label     String  // ex: "30ml", "50ml"
+  price     Int
+  stock     Int     @default(0)
+  position  Int     @default(0)
+  archived  Boolean @default(false)
+
+  packPrices ProductPackPrice[]
+  orderItems OrderItem[]
+  kitItems   KitItem[]
+
+  @@unique([productId, label])
+}
+
+/// Paliers de prix par quantité (1 à X GNF, 3 à Y GNF...).
+/// Rattaché soit directement au produit (pas de taille), soit à une taille précise.
+model ProductPackPrice {
+  id            String       @id @default(cuid())
+  productId     String
+  product       Product      @relation(fields: [productId], references: [id])
+  productSizeId String?
+  productSize   ProductSize? @relation(fields: [productSizeId], references: [id])
+  quantity      Int          // 1, 3, 5...
+  price         Int          // prix total pour cette quantité
+  position      Int          @default(0)
+
+  @@unique([productId, productSizeId, quantity])
+}
+
+model Promotion {
+  id          String    @id @default(cuid())
+  name        String                          // ex: "Soldes été 2026"
+  discountPercent Int                         // ex: 20 (pour -20%)
+  startAt     DateTime
+  endAt       DateTime
+  active      Boolean   @default(true)        // peut être désactivée manuellement
+  products    ProductPromotion[]
+  createdAt   DateTime  @default(now())
+}
+
+// Table de jointure — une promo peut couvrir plusieurs produits,
+// un produit peut avoir plusieurs promos (on applique la plus avantageuse)
+model ProductPromotion {
+  id          String    @id @default(cuid())
+  promotionId String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, productId])
+}
+/// Kit / bundle de produits (ex: "kit soin visage complet").
+model Kit {
+  id            String      @id @default(cuid())
+  name          String
+  description   String?
+  price         Int         // prix fixe du kit
+  originalPrice Int?
+  images        String[]
+  archived      Boolean     @default(false)
+  items         KitItem[]
+  orderItems    OrderItem[]
+  createdAt     DateTime    @default(now())
+}
+
+model KitItem {
+  id            String       @id @default(cuid())
+  kitId         String
+  kit           Kit          @relation(fields: [kitId], references: [id])
+  productId     String
+  product       Product      @relation(fields: [productId], references: [id])
+  productSizeId String?
+  productSize   ProductSize? @relation(fields: [productSizeId], references: [id])
+  quantity      Int          @default(1)
+
+  @@unique([kitId, productId, productSizeId])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  phone      String   @unique
+  name       String
+  quartier   String
+  loyaltyPts Int      @default(0)
+  vip        Boolean  @default(false)
+  orders     Order[]
+  createdAt  DateTime @default(now())
+}
+
+model Order {
+  id     String      @id @default(cuid())
+  number Int         @unique @default(autoincrement())
+  status OrderStatus @default(NOUVELLE)
+  source String      @default("app")
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  name     String
+  phone    String
+  quartier String
+  comment  String?
+
+  estimatedTotal Int
+
+  discountAmount Int     @default(0)
+  discountReason String?
+
+  finalTotal Int @default(0)
+
+  items    OrderItem[]
+  delivery Delivery?
+  giftCard GiftCard?
+
+  createdAt DateTime @default(now())
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+
+  productSizeId String?
+  productSize   ProductSize? @relation(fields: [productSizeId], references: [id])
+
+  kitId String?
+  kit   Kit?    @relation(fields: [kitId], references: [id])
+
+  quantity  Int
+  unitPrice Int
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
+
+/// Livreurs enregistrés, pour grouper les livraisons par personne.
+model Livreur {
+  id     String  @id @default(cuid())
+  name   String
+  phone  String  @unique
+  active Boolean @default(true)
+  notes  String?
+
+  deliveries Delivery[]
+  createdAt  DateTime   @default(now())
+}
+
+model Delivery {
+  id          String         @id @default(cuid())
+  orderId     String         @unique
+  order       Order          @relation(fields: [orderId], references: [id])
+  status      DeliveryStatus @default(PLANIFIEE)
+  scheduledAt DateTime
+  deliveredAt DateTime?
+
+  livreurId String?
+  livreur   Livreur? @relation(fields: [livreurId], references: [id])
+
+  deliveryFee Int      @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Carte cadeau associée à une commande passée pour offrir à un tiers.
+/// Créée uniquement si le client coche "Cette commande est un cadeau" au checkout.
+/// Le message/la photo finaux sont validés par l'admin avant publication du lien public.
+model GiftCard {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  recipientName  String
+  recipientPhone String
+  message        String? // texte final de la carte ; si absent, généré à l'affichage
+  photo          String? // nom de fichier Supabase Storage (bucket "catalogue") ; si absent, fallback hero-illustration.png
+
+  status      GiftCardStatus @default(DRAFT)
+  token       String?        @unique // généré à la première publication
+  publishedAt DateTime?
+  expiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
