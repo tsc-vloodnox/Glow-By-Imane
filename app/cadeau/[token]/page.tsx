@@ -1,6 +1,7 @@
 // Destination : app/cadeau/[token]/page.tsx
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
 import { prisma } from "@/lib/prisma";
 import { buildDefaultGiftMessage } from "@/lib/gift-card";
@@ -8,17 +9,10 @@ import { catalogPath } from "@/lib/images";
 
 type Props = { params: Promise<{ token: string }> };
 
-export async function generateMetadata(): Promise<Metadata> {
-  return {
-    title: "Carte cadeau",
-    robots: { index: false, follow: false },
-  };
-}
-
-export default async function GiftCardPage({ params }: Props) {
-  const { token } = await params;
-
-  const giftCard = await prisma.giftCard.findUnique({
+// Mémoïsé (React cache) — évite d'interroger deux fois la même carte
+// (une fois pour generateMetadata, une fois pour le rendu de la page).
+const getGiftCard = cache(async (token: string) =>
+  prisma.giftCard.findUnique({
     where: { token },
     include: {
       order: {
@@ -32,7 +26,49 @@ export default async function GiftCardPage({ params }: Props) {
         },
       },
     },
-  });
+  }),
+);
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { token } = await params;
+  const giftCard = await getGiftCard(token);
+
+  const isAvailable =
+    !!giftCard &&
+    giftCard.status === "PUBLISHED" &&
+    (!giftCard.expiresAt || giftCard.expiresAt > new Date());
+
+  if (!isAvailable) {
+    return { title: "Carte cadeau", robots: { index: false, follow: false } };
+  }
+
+  const title = `${giftCard.order.name} vous a envoyé un cadeau 🎁`;
+  const description = "Découvrez votre surprise sur Glow by Imane.";
+  const image = giftCard.photo ? catalogPath(giftCard.photo) : "/hero-illustration.png";
+
+  return {
+    title,
+    description,
+    robots: { index: false, follow: false },
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      images: image ? [{ url: image, width: 1200, height: 630, alt: "Carte cadeau Glow by Imane" }] : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: image ? [image] : undefined,
+    },
+  };
+}
+
+export default async function GiftCardPage({ params }: Props) {
+  const { token } = await params;
+
+  const giftCard = await getGiftCard(token);
 
   if (!giftCard) notFound();
 
