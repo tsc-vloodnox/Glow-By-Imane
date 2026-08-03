@@ -21,8 +21,10 @@ export type CartItemInput =
 export type GiftInput = {
   recipientName: string;
   recipientPhone: string;
+  recipientAddress: string;
   message?: string;
   photo?: string;
+  printRequested?: boolean;
 };
 
 export type OrderInput = {

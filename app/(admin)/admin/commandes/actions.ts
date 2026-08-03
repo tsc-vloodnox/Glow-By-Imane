@@ -146,15 +146,16 @@ export async function updateGiftCard(orderId: string, formData: FormData) {
 
   const recipientName = String(formData.get("recipientName") ?? "").trim();
   const recipientPhone = String(formData.get("recipientPhone") ?? "").trim();
+  const recipientAddress = String(formData.get("recipientAddress") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim() || null;
 
-  if (!recipientName || !recipientPhone) {
-    throw new Error("Nom et téléphone du destinataire requis.");
+  if (!recipientName || !recipientPhone || !recipientAddress) {
+    throw new Error("Nom, téléphone et adresse du destinataire requis.");
   }
 
   await prisma.giftCard.update({
     where: { orderId },
-    data: { recipientName, recipientPhone, message },
+    data: { recipientName, recipientPhone, recipientAddress, message },
   });
 
   revalidatePath(`/admin/commandes/${orderId}`);

@@ -22,12 +22,20 @@ export function buildWhatsAppUrl(phone: string, message?: string): string {
   return message ? `${base}?text=${encodeURIComponent(message)}` : base;
 }
 
-export function buildOrderMessage(order: OrderWithItems, customer: CustomerDetails): string {
+export function buildOrderMessage(
+  order: OrderWithItems,
+  customer: CustomerDetails,
+  giftPrintFee?: number,
+): string {
   const lines = order.items.map((item) => {
     if (item.kit) return `- ${item.kit.name} (kit) x${item.quantity}`;
     const sizePart = item.productSize ? ` (${item.productSize.label})` : "";
     return `- ${item.product?.name ?? "Article"}${sizePart} x${item.quantity}`;
   });
+
+  if (giftPrintFee) {
+    lines.push(`- Impression de la carte cadeau : ${giftPrintFee.toLocaleString("fr-GN")} GNF`);
+  }
 
   const customerInfo = [
     `Nom : ${customer.name}`,

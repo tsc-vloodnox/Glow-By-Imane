@@ -16,6 +16,8 @@ type DeliveryData = {
   notes: string | null;
 } | null;
 
+type GiftDelivery = { recipientName: string; recipientAddress: string } | null;
+
 type Props = {
   orderId: string;
   orderNumber: number;
@@ -24,6 +26,7 @@ type Props = {
   orderQuartier: string;
   orderFinalTotal: number;
   delivery: DeliveryData;
+  giftDelivery?: GiftDelivery;
 };
 
 export function DeliveryPanel({
@@ -34,6 +37,7 @@ export function DeliveryPanel({
   orderQuartier,
   orderFinalTotal,
   delivery,
+  giftDelivery,
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const [showForm, setShowForm] = useState(false);
@@ -113,6 +117,13 @@ export function DeliveryPanel({
       {error && (
         <p className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {error}
+        </p>
+      )}
+
+      {giftDelivery && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          🎁 Commande cadeau — livrer à <strong>{giftDelivery.recipientName}</strong> :{" "}
+          {giftDelivery.recipientAddress} (et non à l&apos;adresse de la cliente ci-dessous).
         </p>
       )}
 

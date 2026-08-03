@@ -126,6 +126,10 @@ export default async function OrderDetailPage({ params }: Props) {
               deliveryFee: order.delivery.deliveryFee ?? 0,
               notes: order.delivery.notes,
             } : null}
+            giftDelivery={order.giftCard ? {
+              recipientName: order.giftCard.recipientName,
+              recipientAddress: order.giftCard.recipientAddress,
+            } : null}
           />
 
           {/* Carte cadeau */}
@@ -140,8 +144,10 @@ export default async function OrderDetailPage({ params }: Props) {
               giftCard={{
                 recipientName: order.giftCard.recipientName,
                 recipientPhone: order.giftCard.recipientPhone,
+                recipientAddress: order.giftCard.recipientAddress,
                 message: order.giftCard.message,
                 photo: order.giftCard.photo,
+                printRequested: order.giftCard.printRequested,
                 status: order.giftCard.status,
                 token: order.giftCard.token,
                 expiresAt: order.giftCard.expiresAt,

@@ -2,6 +2,9 @@
 
 export const GIFT_LINK_EXPIRY_DAYS = 30;
 
+/** Frais fixes d'impression physique de la carte cadeau, ajoutés au total de la commande. */
+export const GIFT_PRINT_FEE = 15000;
+
 /**
  * Message par défaut affiché sur la carte cadeau quand le client n'en a saisi
  * aucun (ou que l'admin n'a pas encore personnalisé). Calculé à l'affichage,

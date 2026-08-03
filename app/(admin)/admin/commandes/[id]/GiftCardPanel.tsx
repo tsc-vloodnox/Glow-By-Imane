@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { catalogPath } from "@/lib/images";
-import { buildDefaultGiftMessage, giftCardUrl } from "@/lib/gift-card";
+import { buildDefaultGiftMessage, giftCardUrl, GIFT_PRINT_FEE } from "@/lib/gift-card";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import { uploadProductImage } from "../../produits/upload";
 import {
@@ -16,8 +16,10 @@ import {
 type GiftCardData = {
   recipientName: string;
   recipientPhone: string;
+  recipientAddress: string;
   message: string | null;
   photo: string | null;
+  printRequested: boolean;
   status: "DRAFT" | "PUBLISHED";
   token: string | null;
   expiresAt: Date | null;
@@ -36,6 +38,7 @@ export function GiftCardPanel({ orderId, clientName, items, giftCard }: Props) {
   const [local, setLocal] = useState(giftCard);
   const [recipientName, setRecipientName] = useState(giftCard.recipientName);
   const [recipientPhone, setRecipientPhone] = useState(giftCard.recipientPhone);
+  const [recipientAddress, setRecipientAddress] = useState(giftCard.recipientAddress);
   const [message, setMessage] = useState(giftCard.message ?? "");
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -50,12 +53,13 @@ export function GiftCardPanel({ orderId, clientName, items, giftCard }: Props) {
     const formData = new FormData();
     formData.set("recipientName", recipientName);
     formData.set("recipientPhone", recipientPhone);
+    formData.set("recipientAddress", recipientAddress);
     formData.set("message", message);
 
     startTransition(async () => {
       try {
         await updateGiftCard(orderId, formData);
-        setLocal((prev) => ({ ...prev, recipientName, recipientPhone, message: message || null }));
+        setLocal((prev) => ({ ...prev, recipientName, recipientPhone, recipientAddress, message: message || null }));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erreur lors de l'enregistrement.");
       }
@@ -179,6 +183,24 @@ export function GiftCardPanel({ orderId, clientName, items, giftCard }: Props) {
             className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
           />
         </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Adresse de livraison du destinataire</span>
+          <input
+            value={recipientAddress}
+            onChange={(e) => setRecipientAddress(e.target.value)}
+            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
+          />
+          <span className="text-xs text-amber-700">
+            ⚠️ La livraison doit se faire à cette adresse, pas à celle de la cliente.
+          </span>
+        </label>
+
+        {local.printRequested && (
+          <p className="rounded-lg bg-[var(--color-blush)]/60 px-3 py-2 text-xs text-[var(--color-foreground)]">
+            🖨️ Impression demandée — {GIFT_PRINT_FEE.toLocaleString("fr-GN")} GNF déjà inclus dans le total de la commande.
+          </p>
+        )}
 
         <label className="block space-y-1">
           <span className="text-sm font-medium">Message sur la carte</span>

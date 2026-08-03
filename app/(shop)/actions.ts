@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
+import { GIFT_PRINT_FEE } from "@/lib/gift-card";
 import type { CartItemInput, OrderInput } from "@/types/types";
 import type { CartItem } from "@/lib/cart";
 
@@ -139,7 +140,12 @@ export async function createOrder(data: OrderInput) {
       }
     }
 
-    // 5. Création de la commande seulement si tout le stock a été réservé
+    // 5. Frais d'impression de la carte cadeau, s'il a été demandé
+    if (data.gift?.printRequested) {
+      estimatedTotal += GIFT_PRINT_FEE;
+    }
+
+    // 6. Création de la commande seulement si tout le stock a été réservé
     return tx.order.create({
       data: {
         name: data.name,
@@ -154,8 +160,10 @@ export async function createOrder(data: OrderInput) {
               create: {
                 recipientName: data.gift.recipientName,
                 recipientPhone: data.gift.recipientPhone,
+                recipientAddress: data.gift.recipientAddress,
                 message: data.gift.message || null,
                 photo: data.gift.photo || null,
+                printRequested: data.gift.printRequested ?? false,
               },
             }
           : undefined,
@@ -174,12 +182,16 @@ export async function createOrder(data: OrderInput) {
 
   revalidatePath("/admin/commandes");
 
-  return buildOrderMessage(order, {
-    name: data.name,
-    phone: data.phone,
-    quartier: data.quartier,
-    comment: data.comment,
-  });
+  return buildOrderMessage(
+    order,
+    {
+      name: data.name,
+      phone: data.phone,
+      quartier: data.quartier,
+      comment: data.comment,
+    },
+    data.gift?.printRequested ? GIFT_PRINT_FEE : undefined,
+  );
 }
 
 /**

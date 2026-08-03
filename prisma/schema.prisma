@@ -244,10 +244,13 @@ model GiftCard {
   orderId String @unique
   order   Order  @relation(fields: [orderId], references: [id])
 
-  recipientName  String
-  recipientPhone String
-  message        String? // texte final de la carte ; si absent, généré à l'affichage
-  photo          String? // nom de fichier Supabase Storage (bucket "catalogue") ; si absent, fallback hero-illustration.png
+  recipientName    String
+  recipientPhone   String
+  recipientAddress String // adresse/quartier de livraison du destinataire — distincte de Order.quartier (celle de la cliente)
+  message          String? // texte final de la carte ; si absent, généré à l'affichage
+  photo            String? // nom de fichier Supabase Storage (bucket "catalogue") ; si absent, fallback hero-illustration.png
+
+  printRequested Boolean @default(false) // impression physique de la carte demandée au checkout — ajoute GIFT_PRINT_FEE au total de la commande
 
   status      GiftCardStatus @default(DRAFT)
   token       String?        @unique // généré à la première publication

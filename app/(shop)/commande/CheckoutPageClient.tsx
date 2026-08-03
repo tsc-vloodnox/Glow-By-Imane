@@ -8,6 +8,7 @@ import { createOrder, refreshCartPrices } from "../actions";
 import { useCart } from "../CartContext";
 import { resolveDiscountedLineTotal } from "@/lib/pricing";
 import { trackPixelEvent } from "@/lib/fbpixel";
+import { GIFT_PRINT_FEE } from "@/lib/gift-card";
 import { uploadGiftPhoto } from "./gift-upload";
 
 const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
@@ -36,6 +37,7 @@ export default function CheckoutPageClient() {
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const [isGift, setIsGift] = useState(false);
+  const [printRequested, setPrintRequested] = useState(false);
   const [giftPhoneError, setGiftPhoneError] = useState<string | null>(null);
   const [giftPhotoName, setGiftPhotoName] = useState<string | null>(null);
   const [giftPhotoPreview, setGiftPhotoPreview] = useState<string | null>(null);
@@ -104,11 +106,21 @@ export default function CheckoutPageClient() {
     }
     setPhoneError(null);
 
-    let gift: { recipientName: string; recipientPhone: string; message?: string; photo?: string } | undefined;
+    let gift:
+      | {
+          recipientName: string;
+          recipientPhone: string;
+          recipientAddress: string;
+          message?: string;
+          photo?: string;
+          printRequested?: boolean;
+        }
+      | undefined;
 
     if (isGift) {
       const giftRecipientName = String(formData.get("giftRecipientName") || "").trim();
       const giftRecipientPhone = String(formData.get("giftRecipientPhone") || "").trim();
+      const giftRecipientAddress = String(formData.get("giftRecipientAddress") || "").trim();
 
       if (!PHONE_PATTERN.test(giftRecipientPhone.replace(/\s/g, ""))) {
         setGiftPhoneError("Format attendu : 6XX XX XX XX (numéro guinéen).");
@@ -119,8 +131,10 @@ export default function CheckoutPageClient() {
       gift = {
         recipientName: giftRecipientName,
         recipientPhone: giftRecipientPhone,
+        recipientAddress: giftRecipientAddress,
         message: String(formData.get("giftMessage") || "").trim() || undefined,
         photo: giftPhotoName || undefined,
+        printRequested,
       };
     }
 
@@ -187,10 +201,20 @@ export default function CheckoutPageClient() {
               </span>
             </div>
           ))}
+          {isGift && printRequested && (
+            <div className="flex items-center justify-between">
+              <span>Impression de la carte cadeau</span>
+              <span>{GIFT_PRINT_FEE.toLocaleString("fr-GN")} GNF</span>
+            </div>
+          )}
         </div>
         <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm font-semibold text-[var(--color-accent)]">
           <span>Total</span>
-          <span>{isRefreshing ? "..." : `${total.toLocaleString("fr-GN")} GNF`}</span>
+          <span>
+            {isRefreshing
+              ? "..."
+              : `${(total + (isGift && printRequested ? GIFT_PRINT_FEE : 0)).toLocaleString("fr-GN")} GNF`}
+          </span>
         </div>
       </div>
 
@@ -261,6 +285,16 @@ export default function CheckoutPageClient() {
             </label>
 
             <label className="block space-y-1">
+              <span className="text-sm font-medium">Adresse de livraison du destinataire</span>
+              <input
+                name="giftRecipientAddress"
+                required
+                className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+                placeholder="Quartier + point de repère du destinataire"
+              />
+            </label>
+
+            <label className="block space-y-1">
               <span className="text-sm font-medium">Message personnalisé (optionnel)</span>
               <textarea
                 name="giftMessage"
@@ -287,6 +321,18 @@ export default function CheckoutPageClient() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={giftPhotoPreview} alt="Aperçu de la photo cadeau" className="mt-2 h-24 w-24 rounded-xl object-cover" />
               ) : null}
+            </label>
+
+            <label className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-white px-4 py-3">
+              <input
+                type="checkbox"
+                checked={printRequested}
+                onChange={(e) => setPrintRequested(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span className="text-sm font-medium">
+                🖨️ Faire imprimer la carte ({GIFT_PRINT_FEE.toLocaleString("fr-GN")} GNF)
+              </span>
             </label>
           </div>
         )}
