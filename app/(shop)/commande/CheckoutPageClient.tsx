@@ -1,5 +1,6 @@
 "use client";
 
+import imageCompression from "browser-image-compression";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -7,8 +8,24 @@ import { createOrder, refreshCartPrices } from "../actions";
 import { useCart } from "../CartContext";
 import { resolveDiscountedLineTotal } from "@/lib/pricing";
 import { trackPixelEvent } from "@/lib/fbpixel";
+import { uploadGiftPhoto } from "./gift-upload";
 
 const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
+
+// Compresse et convertit une image en WebP avant l'upload (photo de carte cadeau).
+async function compressImage(file: File): Promise<File> {
+  try {
+    return await imageCompression(file, {
+      maxSizeMB: 1,
+      maxWidthOrHeight: 1200,
+      useWebWorker: true,
+      fileType: "image/webp",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return file;
+  }
+}
 
 export default function CheckoutPageClient() {
   const { items, total, clear, replaceAll } = useCart();
@@ -17,6 +34,13 @@ export default function CheckoutPageClient() {
   const [message, setMessage] = useState<string | null>(null);
   const [priceNotice, setPriceNotice] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  const [isGift, setIsGift] = useState(false);
+  const [giftPhoneError, setGiftPhoneError] = useState<string | null>(null);
+  const [giftPhotoName, setGiftPhotoName] = useState<string | null>(null);
+  const [giftPhotoPreview, setGiftPhotoPreview] = useState<string | null>(null);
+  const [isUploadingGiftPhoto, setIsUploadingGiftPhoto] = useState(false);
+  const [giftPhotoError, setGiftPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (items.length === 0) {
@@ -44,6 +68,25 @@ export default function CheckoutPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function handleGiftPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setGiftPhotoError(null);
+    setIsUploadingGiftPhoto(true);
+
+    try {
+      const compressed = await compressImage(file);
+      const fileName = await uploadGiftPhoto(compressed);
+      setGiftPhotoName(fileName);
+      setGiftPhotoPreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      setGiftPhotoError(err instanceof Error ? err.message : "Échec de l'envoi de la photo.");
+    } finally {
+      setIsUploadingGiftPhoto(false);
+    }
+  }
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -61,6 +104,26 @@ export default function CheckoutPageClient() {
     }
     setPhoneError(null);
 
+    let gift: { recipientName: string; recipientPhone: string; message?: string; photo?: string } | undefined;
+
+    if (isGift) {
+      const giftRecipientName = String(formData.get("giftRecipientName") || "").trim();
+      const giftRecipientPhone = String(formData.get("giftRecipientPhone") || "").trim();
+
+      if (!PHONE_PATTERN.test(giftRecipientPhone.replace(/\s/g, ""))) {
+        setGiftPhoneError("Format attendu : 6XX XX XX XX (numéro guinéen).");
+        return;
+      }
+      setGiftPhoneError(null);
+
+      gift = {
+        recipientName: giftRecipientName,
+        recipientPhone: giftRecipientPhone,
+        message: String(formData.get("giftMessage") || "").trim() || undefined,
+        photo: giftPhotoName || undefined,
+      };
+    }
+
     const payload = {
       name: String(formData.get("name") || "").trim(),
       phone,
@@ -76,6 +139,7 @@ export default function CheckoutPageClient() {
               quantity: item.quantity,
             },
       ),
+      gift,
     };
 
     setIsSubmitting(true);
@@ -160,13 +224,80 @@ export default function CheckoutPageClient() {
           <textarea name="comment" rows={3} className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="Instructions de livraison..." />
         </label>
 
+        <label className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-white px-4 py-3">
+          <input
+            type="checkbox"
+            checked={isGift}
+            onChange={(e) => setIsGift(e.target.checked)}
+            className="h-4 w-4"
+          />
+          <span className="text-sm font-medium">🎁 Cette commande est un cadeau</span>
+        </label>
+
+        {isGift && (
+          <div className="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-blush)]/30 p-4">
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">Nom du destinataire</span>
+              <input
+                name="giftRecipientName"
+                required
+                className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+                placeholder="Nom de la personne à qui offrir"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">Numéro du destinataire</span>
+              <input
+                name="giftRecipientPhone"
+                required
+                type="tel"
+                inputMode="numeric"
+                onChange={() => setGiftPhoneError(null)}
+                className={`w-full rounded-xl border px-4 py-3 ${giftPhoneError ? "border-red-300" : "border-[var(--color-border)]"}`}
+                placeholder="6XX XX XX XX"
+              />
+              {giftPhoneError ? <span className="text-xs text-red-600">{giftPhoneError}</span> : null}
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">Message personnalisé (optionnel)</span>
+              <textarea
+                name="giftMessage"
+                rows={3}
+                className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3"
+                placeholder="Un petit mot pour accompagner le cadeau..."
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium">Photo (optionnelle)</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleGiftPhotoChange}
+                disabled={isUploadingGiftPhoto}
+                className="w-full text-sm"
+              />
+              {isUploadingGiftPhoto ? (
+                <span className="text-xs text-[var(--color-muted)]">Envoi de la photo...</span>
+              ) : null}
+              {giftPhotoError ? <span className="text-xs text-red-600">{giftPhotoError}</span> : null}
+              {giftPhotoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={giftPhotoPreview} alt="Aperçu de la photo cadeau" className="mt-2 h-24 w-24 rounded-xl object-cover" />
+              ) : null}
+            </label>
+          </div>
+        )}
+
         <p className="rounded-xl bg-[var(--color-blush)]/60 px-4 py-3 text-xs text-[var(--color-muted)]">
           Vous ne payez rien maintenant. Imane vous contactera sur WhatsApp pour confirmer la disponibilité et les frais de livraison.
         </p>
 
         <button
           type="submit"
-          disabled={isSubmitting || isRefreshing}
+          disabled={isSubmitting || isRefreshing || isUploadingGiftPhoto}
           className="w-full rounded-full bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
         >
           {isSubmitting ? "Envoi en cours..." : "Envoyer sur WhatsApp"}

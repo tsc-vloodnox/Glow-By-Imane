@@ -149,6 +149,16 @@ export async function createOrder(data: OrderInput) {
         estimatedTotal,
         finalTotal: estimatedTotal,
         items: { create: orderItemsData },
+        giftCard: data.gift
+          ? {
+              create: {
+                recipientName: data.gift.recipientName,
+                recipientPhone: data.gift.recipientPhone,
+                message: data.gift.message || null,
+                photo: data.gift.photo || null,
+              },
+            }
+          : undefined,
       },
       include: {
         items: {

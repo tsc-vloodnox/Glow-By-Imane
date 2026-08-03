@@ -2,6 +2,7 @@ import type {
   Category,
   Customer,
   Delivery,
+  GiftCard,
   Kit,
   KitItem,
   Order,
@@ -17,12 +18,20 @@ export type CartItemInput =
   | { kind: "product"; productId: string; productSizeId?: string | null; quantity: number }
   | { kind: "kit"; kitId: string; quantity: number };
 
+export type GiftInput = {
+  recipientName: string;
+  recipientPhone: string;
+  message?: string;
+  photo?: string;
+};
+
 export type OrderInput = {
   name: string;
   phone: string;
   quartier: string;
   comment?: string;
   items: CartItemInput[];
+  gift?: GiftInput;
 };
 
 // ─── Statuts ─────────────────────────────────────────────────────────────────
@@ -54,6 +63,7 @@ export type OrderWithDetails = Order & {
   items: OrderItemWithProduct[];
   delivery: Delivery | null;
   customer: Customer | null;
+  giftCard: GiftCard | null;
 };
 
 export type OrderListRow = Order & {
