@@ -87,7 +87,8 @@ app/
 │   │   └── CartPageClient.tsx    # Stepper +/− borné au stock réel de chaque article
 │   ├── commande/
 │   │   ├── page.tsx
-│   │   └── CheckoutPageClient.tsx # Revalidation des prix serveur au montage
+│   │   ├── CheckoutPageClient.tsx # Revalidation des prix serveur au montage + case "Cadeau"
+│   │   └── gift-upload.ts        # Upload photo de carte cadeau (public, checkout)
 │   ├── produits/
 │   │   └── [slug]/
 │   │       ├── page.tsx          # Fiche produit (findUnique par id)
@@ -113,14 +114,18 @@ app/
     ├── categories/               # CRUD catégories (création, renommage inline, suppression)
     ├── commandes/                # Gestion commandes
     │   ├── new/                  # Saisie manuelle (WhatsApp / hors-app)
-    │   └── [id]/
+    │   └── [id]/                 # Fiche commande — inclut GiftCardPanel.tsx
     ├── livraisons/               # Suivi livraisons par jour et quartier
     ├── livreurs/                 # Gestion des livreurs
     └── kits/                     # Gestion des kits / bundles
 
+cadeau/
+└── [token]/                      # Page publique de consultation d'une carte cadeau publiée
+
 lib/
 ├── admin-auth.ts                 # Auth HMAC : génération et vérification de token
 ├── cart.ts                       # Logique panier localStorage (CartItem inclut stock)
+├── gift-card.ts                  # buildDefaultGiftMessage(), giftCardUrl(), durée d'expiration du lien
 ├── images.ts                     # catalogPath() — résolution URL Supabase Storage
 ├── order-status.ts               # Config centralisée des statuts (labels, couleurs, transitions)
 ├── pricing.ts                    # getDiscountPercent() — calcul remises produit/kit
@@ -147,7 +152,7 @@ public/
 
 app/
 ├── sitemap.ts                    # Sitemap dynamique (servi sur /sitemap.xml)
-├── robots.ts                     # Robots.txt (bloque /admin/ et /api/)
+├── robots.ts                     # Robots.txt (bloque /admin/, /api/ et /cadeau/)
 └── manifest.ts                   # Web App Manifest (PWA)
 
 types.ts                          # Types TypeScript partagés
@@ -170,6 +175,8 @@ types.ts                          # Types TypeScript partagés
 **`Order`** — Commandes avec workflow de statut, support de remises (`discountAmount`, `discountReason`, `finalTotal`) et traçabilité de la source (`app` / `whatsapp` / `admin`).
 
 **`Delivery`** — Entité logistique séparée de la commande. Contient la date planifiée, le statut, le livreur assigné et les frais de livraison convenus (`deliveryFee`).
+
+**`GiftCard`** — Carte cadeau optionnelle associée à une commande (créée uniquement si le client coche "Cette commande est un cadeau" au checkout). Contient les infos destinataire, un message et une photo (tous deux modifiables/validables par l'admin), un statut `DRAFT`/`PUBLISHED` et un `token` unique généré à la publication pour le lien public temporaire (`/cadeau/[token]`, expire `GIFT_LINK_EXPIRY_DAYS` après publication — 30 jours par défaut).
 
 **`Customer`** — Profil client avec points de fidélité et statut VIP.
 
@@ -248,6 +255,9 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 - **Saisie manuelle** (`/new`) pour les commandes WhatsApp ou hors-application
 - Page de détail avec changement de statut (transitions autorisées uniquement, validées côté serveur dans `updateOrderStatus`)
 - **Remise** : montant + raison, aperçu du total final en temps réel
+- **Carte cadeau** (si le client a coché "Cette commande est un cadeau" au checkout) : édition du
+  destinataire/message/photo, publication d'un lien public temporaire (30 jours), envoi du lien
+  au destinataire via WhatsApp — voir `GiftCardPanel.tsx`
 - **Suppression en masse** avec double confirmation
 - Temps réel via Supabase Realtime : nouvelle commande → toast admin + Web Push
 
@@ -265,7 +275,7 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 
 - Métadonnées globales + `generateMetadata` dynamique par fiche produit
 - Sitemap dynamique (`/sitemap.xml`) incluant toutes les fiches produit non archivées
-- `robots.txt` bloquant `/admin/` et `/api/`
+- `robots.txt` bloquant `/admin/`, `/api/` et `/cadeau/` (liens de cartes cadeau partagés, pas indexables — `noindex` également posé par page via `generateMetadata`)
 - Web App Manifest (`manifest.webmanifest`) — installable sur mobile/desktop
 - Site indexé sur Google Search Console (domaine vérifié via enregistrement TXT OVH)
 
@@ -281,6 +291,7 @@ L'application n'utilise pas l'API WhatsApp — elle génère des **liens `wa.me`
 | Notification de livraison | Admin depuis la page de détail livraison |
 | Liste journalière livreur | Admin depuis la vue livraisons du jour |
 | Contact direct client | Admin depuis la liste des commandes |
+| Envoi du lien de carte cadeau | Admin depuis la fiche commande, une fois la carte publiée |
 
 > WhatsApp reste le canal de communication, l'app est le registre.
 

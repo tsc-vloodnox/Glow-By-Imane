@@ -1,11 +1,14 @@
 "use server";
 
+import { randomUUID } from "crypto";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
+import { GIFT_LINK_EXPIRY_DAYS, giftCardUrl } from "@/lib/gift-card";
 
 export type OrderStatusValue =
   | "NOUVELLE"
@@ -116,8 +119,11 @@ export async function deleteAllOrders(statusFilter?: OrderStatusValue) {
 
   const where = statusFilter ? { status: statusFilter } : {};
 
-  // Supprime d'abord les livraisons liées (contrainte FK)
+  // Supprime d'abord les livraisons et cartes cadeau liées (contrainte FK)
   await prisma.delivery.deleteMany({
+    where: { order: where },
+  });
+  await prisma.giftCard.deleteMany({
     where: { order: where },
   });
 
@@ -131,4 +137,64 @@ export async function deleteAllOrders(statusFilter?: OrderStatusValue) {
 
   revalidatePath("/admin/commandes");
   revalidatePath("/admin/livraisons");
+}
+
+// ─── Carte cadeau ─────────────────────────────────────────────────────────────
+
+export async function updateGiftCard(orderId: string, formData: FormData) {
+  await requireAdmin();
+
+  const recipientName = String(formData.get("recipientName") ?? "").trim();
+  const recipientPhone = String(formData.get("recipientPhone") ?? "").trim();
+  const message = String(formData.get("message") ?? "").trim() || null;
+
+  if (!recipientName || !recipientPhone) {
+    throw new Error("Nom et téléphone du destinataire requis.");
+  }
+
+  await prisma.giftCard.update({
+    where: { orderId },
+    data: { recipientName, recipientPhone, message },
+  });
+
+  revalidatePath(`/admin/commandes/${orderId}`);
+}
+
+export async function updateGiftCardPhoto(orderId: string, photo: string) {
+  await requireAdmin();
+  await prisma.giftCard.update({ where: { orderId }, data: { photo } });
+  revalidatePath(`/admin/commandes/${orderId}`);
+}
+
+export async function publishGiftCard(orderId: string) {
+  await requireAdmin();
+
+  const existing = await prisma.giftCard.findUniqueOrThrow({ where: { orderId } });
+  const token = existing.token ?? randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + GIFT_LINK_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+  await prisma.giftCard.update({
+    where: { orderId },
+    data: { status: "PUBLISHED", token, publishedAt: now, expiresAt },
+  });
+
+  revalidatePath(`/admin/commandes/${orderId}`);
+  revalidatePath("/admin/commandes");
+  revalidatePath(`/cadeau/${token}`);
+
+  return giftCardUrl(token);
+}
+
+export async function unpublishGiftCard(orderId: string) {
+  await requireAdmin();
+
+  const giftCard = await prisma.giftCard.update({
+    where: { orderId },
+    data: { status: "DRAFT" },
+  });
+
+  revalidatePath(`/admin/commandes/${orderId}`);
+  revalidatePath("/admin/commandes");
+  if (giftCard.token) revalidatePath(`/cadeau/${giftCard.token}`);
 }

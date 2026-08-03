@@ -34,6 +34,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
         include: { product: { select: { name: true } } },
       },
       delivery: { select: { status: true, scheduledAt: true } },
+      giftCard: { select: { id: true } },
     },
   });
 
@@ -143,6 +144,14 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
                     {order.estimatedTotal.toLocaleString("fr-GN")} GNF
                   </span>
                   <div className="flex flex-wrap justify-end gap-1">
+                    {order.giftCard && (
+                      <span
+                        className="rounded-full bg-pink-100 px-2 py-0.5 text-[10px] font-medium text-pink-700 whitespace-nowrap"
+                        title="Commande cadeau"
+                      >
+                        🎁
+                      </span>
+                    )}
                     {order.delivery && (
                       <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700 whitespace-nowrap">
                         {order.delivery.status === "LIVREE"

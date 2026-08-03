@@ -8,6 +8,7 @@ import { requireAdmin } from "../../actions";
 import { OrderStatusChanger } from "./OrderStatusChanger";
 import { DeliveryPanel } from "./DeliveryPanel";
 import { OrderDiscountEditor } from "./OrderDiscountEditor";
+import { GiftCardPanel } from "./GiftCardPanel";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -24,9 +25,15 @@ export default async function OrderDetailPage({ params }: Props) {
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
-      items: { include: { product: { select: { id: true, name: true, images: true } } } },
+      items: {
+        include: {
+          product: { select: { id: true, name: true, images: true } },
+          kit: { select: { id: true, name: true } },
+        },
+      },
       customer: true,
       delivery: true,
+      giftCard: true,
     },
   });
 
@@ -120,7 +127,28 @@ export default async function OrderDetailPage({ params }: Props) {
               notes: order.delivery.notes,
             } : null}
           />
-        </div> 
+
+          {/* Carte cadeau */}
+          {order.giftCard && (
+            <GiftCardPanel
+              orderId={order.id}
+              clientName={order.name}
+              items={order.items.map((item) => ({
+                name: item.kit?.name ?? item.product?.name ?? "Article",
+                quantity: item.quantity,
+              }))}
+              giftCard={{
+                recipientName: order.giftCard.recipientName,
+                recipientPhone: order.giftCard.recipientPhone,
+                message: order.giftCard.message,
+                photo: order.giftCard.photo,
+                status: order.giftCard.status,
+                token: order.giftCard.token,
+                expiresAt: order.giftCard.expiresAt,
+              }}
+            />
+          )}
+        </div>
 
         {/* Colonne client */}
         <div className="space-y-4">
