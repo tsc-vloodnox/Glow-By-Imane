@@ -7,6 +7,9 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 import { UserError, withActionResult } from "@/lib/action-result";
+import { toDate, toInt, toJsonArray } from "@/lib/form-validation";
+
+const isBlank = (value: unknown) => value === undefined || value === null || value === "";
 
 // ─── Helpers revalidation ────────────────────────────────────────────────────
 
@@ -49,35 +52,38 @@ type PackPriceInput = {
   productSizeId?: string | null; // référence un SizeInput.id (réel ou temporaire)
 };
 
-function parseJsonField<T>(raw: FormDataEntryValue | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(String(raw)) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function parseProductFormData(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const price = Number(formData.get("price") ?? 0);
-  const stock = Number(formData.get("stock") ?? 0);
+  const price = toInt(formData.get("price"), "Prix");
+  const stock = toInt(formData.get("stock"), "Stock", { optional: true });
   const categoryId = String(formData.get("categoryId") ?? "").trim();
   const favorite = formData.get("favorite") === "on";
   const imagesField = String(formData.get("images") ?? "").trim();
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
-  if (!name || !categoryId || Number.isNaN(price) || Number.isNaN(stock)) {
-    throw new UserError("Informations invalides.");
-  }
+  if (!name) throw new UserError("Le nom du produit est requis.");
+  if (!categoryId) throw new UserError("La catégorie est requise.");
 
-  const sizes = parseJsonField<SizeInput[]>(formData.get("sizes"), []).filter(
-    (s) => s.label && s.label.trim().length > 0,
-  );
-  const packPrices = parseJsonField<PackPriceInput[]>(formData.get("packPrices"), []).filter(
-    (p) => p.quantity > 0 && p.price > 0,
-  );
+  const sizes: SizeInput[] = (toJsonArray(formData.get("sizes"), "Tailles") as Partial<SizeInput>[])
+    .filter((s) => typeof s.label === "string" && s.label.trim().length > 0)
+    .map((s) => ({
+      id: typeof s.id === "string" ? s.id : undefined,
+      label: (s.label as string).trim().slice(0, 50),
+      price: toInt(s.price, `Prix de la taille « ${s.label} »`),
+      stock: toInt(s.stock, `Stock de la taille « ${s.label} »`, { optional: true }),
+      archived: s.archived === true,
+    }));
+
+  // Lignes vides (quantité et prix non renseignés) ignorées, lignes incomplètes refusées
+  const packPrices: PackPriceInput[] = (toJsonArray(formData.get("packPrices"), "Paliers") as Partial<PackPriceInput>[])
+    .filter((p) => !(isBlank(p.quantity) && isBlank(p.price)))
+    .map((p) => ({
+      id: typeof p.id === "string" ? p.id : undefined,
+      quantity: toInt(p.quantity, "Quantité du palier", { min: 1 }),
+      price: toInt(p.price, "Prix du palier", { min: 1 }),
+      productSizeId: typeof p.productSizeId === "string" ? p.productSizeId : null,
+    }));
 
   return { name, description, price, stock, categoryId, favorite, images, sizes, packPrices };
 }
@@ -279,17 +285,20 @@ type KitItemInput = {
 function parseKitFormData(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
-  const price = Number(formData.get("price") ?? 0);
+  const price = toInt(formData.get("price"), "Prix du kit");
   const imagesField = String(formData.get("images") ?? "").trim();
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
-  if (!name || Number.isNaN(price)) {
-    throw new UserError("Informations invalides.");
-  }
+  if (!name) throw new UserError("Le nom du kit est requis.");
 
-  const items = parseJsonField<KitItemInput[]>(formData.get("items"), []).filter(
-    (i) => i.productId && i.quantity > 0,
-  );
+  const items: KitItemInput[] = (toJsonArray(formData.get("items"), "Articles du kit") as Partial<KitItemInput>[])
+    .filter((i) => typeof i.productId === "string" && i.productId)
+    .map((i) => ({
+      id: typeof i.id === "string" ? i.id : undefined,
+      productId: i.productId as string,
+      productSizeId: typeof i.productSizeId === "string" ? i.productSizeId : null,
+      quantity: toInt(i.quantity, "Quantité d'un article du kit", { min: 1, max: 1000 }),
+    }));
 
   return { name, description, price, images, items };
 }
@@ -411,7 +420,7 @@ async function createDeliveryImpl(formData: FormData) {
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
   const livreurId = String(formData.get("livreurId") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
-  const deliveryFee = Math.max(0, Number(formData.get("deliveryFee") ?? 0));
+  const deliveryFee = toInt(formData.get("deliveryFee"), "Frais de livraison", { optional: true });
 
   if (!orderId || !scheduledAt) {
     throw new UserError("Commande et date de livraison requises.");
@@ -420,7 +429,7 @@ async function createDeliveryImpl(formData: FormData) {
   await prisma.delivery.create({
     data: {
       orderId,
-      scheduledAt: new Date(scheduledAt),
+      scheduledAt: toDate(scheduledAt, "Date de livraison"),
       livreurId,
       notes,
       deliveryFee,
@@ -482,7 +491,7 @@ async function updateDeliveryImpl(deliveryId: string, formData: FormData) {
   await prisma.delivery.update({
     where: { id: deliveryId },
     data: {
-      scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
+      scheduledAt: scheduledAt ? toDate(scheduledAt, "Date de livraison") : undefined,
       livreurId,
       notes,
     },
@@ -569,13 +578,11 @@ async function toggleLivreurActiveImpl(livreurId: string, active: boolean) {
 async function updateDeliveryFeeImpl(deliveryId: string, deliveryFee: number) {
   await requireAdmin();
 
-  if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
-    throw new UserError("Frais de livraison invalides.");
-  }
+  const fee = toInt(deliveryFee, "Frais de livraison");
 
   const delivery = await prisma.delivery.update({
     where: { id: deliveryId },
-    data: { deliveryFee },
+    data: { deliveryFee: fee },
   });
 
   revalidatePath("/admin/livraisons");

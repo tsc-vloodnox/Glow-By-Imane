@@ -176,7 +176,7 @@ model Order {
 
   /// true tant que le stock des articles est réservé (décrémenté) par cette commande.
   /// Passe à false quand le stock est restitué (annulation / suppression) → jamais restitué deux fois.
-  /// Les commandes créées par l'admin ne réservent pas de stock (false).
+  /// Commandes boutique et commandes admin créées après la migration 20260928120000 : true à la création.
   stockReserved Boolean @default(false)
 
   items    OrderItem[]

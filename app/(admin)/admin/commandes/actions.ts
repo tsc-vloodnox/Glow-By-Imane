@@ -10,6 +10,7 @@ import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
 import { GIFT_LINK_EXPIRY_DAYS, giftCardUrl } from "@/lib/gift-card";
 import { releaseOrderStock } from "@/lib/stock";
+import { toInt, toJsonArray } from "@/lib/form-validation";
 import { UserError, withActionResult } from "@/lib/action-result";
 
 export type OrderStatusValue =
@@ -63,10 +64,13 @@ async function updateOrderStatusImpl(orderId: string, status: OrderStatusValue) 
 async function updateOrderDiscountImpl(orderId: string, formData: FormData) {
   await requireAdmin();
 
-  const discountAmount = Math.max(0, Number(formData.get("discountAmount") ?? 0));
+  const discountAmount = toInt(formData.get("discountAmount"), "Remise", { optional: true });
   const discountReason = String(formData.get("discountReason") ?? "").trim() || null;
 
   const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (discountAmount > order.estimatedTotal) {
+    throw new UserError("La remise ne peut pas dépasser le montant de la commande.");
+  }
   const finalTotal = Math.max(0, order.estimatedTotal - discountAmount);
 
   await prisma.order.update({
@@ -87,45 +91,78 @@ async function createAdminOrderImpl(formData: FormData) {
   const phone = String(formData.get("phone") ?? "").trim();
   const quartier = String(formData.get("quartier") ?? "").trim();
   const comment = String(formData.get("comment") ?? "").trim() || null;
-  const source = String(formData.get("source") ?? "whatsapp");
-  const discountAmount = Math.max(0, Number(formData.get("discountAmount") ?? 0));
+  const source = String(formData.get("source") ?? "whatsapp").trim().slice(0, 30) || "whatsapp";
+  const discountAmount = toInt(formData.get("discountAmount"), "Remise", { optional: true });
   const discountReason = String(formData.get("discountReason") ?? "").trim() || null;
 
-  // Items : JSON stringifié depuis le formulaire
-  const itemsRaw = String(formData.get("items") ?? "[]");
-  const items: Array<{ productId: string; quantity: number; unitPrice: number }> =
-    JSON.parse(itemsRaw);
+  // Items : JSON stringifié depuis le formulaire — revalidé ligne par ligne
+  const items = toJsonArray(formData.get("items"), "Articles").map((raw) => {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    if (typeof item.productId !== "string" || !item.productId) throw new UserError("Article invalide.");
+    return {
+      productId: item.productId,
+      quantity: toInt(item.quantity, "Quantité", { min: 1, max: 1000 }),
+      unitPrice: toInt(item.unitPrice, "Prix unitaire"),
+    };
+  });
 
-  if (!name || !phone || !quartier || items.length === 0) {
-    throw new UserError("Informations manquantes.");
+  if (!name || !phone || !quartier) {
+    throw new UserError("Nom, téléphone et quartier requis.");
+  }
+  if (items.length === 0) {
+    throw new UserError("Ajoutez au moins un article.");
   }
 
   const estimatedTotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const finalTotal = Math.max(0, estimatedTotal - discountAmount);
+  if (discountAmount > estimatedTotal) {
+    throw new UserError("La remise ne peut pas dépasser le montant de la commande.");
+  }
+  const finalTotal = estimatedTotal - discountAmount;
 
-  const order = await prisma.order.create({
-    data: {
-      name,
-      phone,
-      quartier,
-      comment,
-      source,
-      estimatedTotal,
-      discountAmount,
-      discountReason,
-      finalTotal,
-      status: "CONFIRMEE", // commande admin = déjà confirmée
-      items: {
-        create: items.map((i) => ({
-          productId: i.productId,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-        })),
+  const order = await prisma.$transaction(async (tx) => {
+    // Décrémentation ATOMIQUE du stock, comme pour une commande boutique :
+    // échoue (et annule tout) si un produit n'a pas assez de stock.
+    for (const item of items) {
+      const result = await tx.product.updateMany({
+        where: { id: item.productId, stock: { gte: item.quantity } },
+        data: { stock: { decrement: item.quantity } },
+      });
+      if (result.count === 0) {
+        const product = await tx.product.findUnique({ where: { id: item.productId }, select: { name: true, stock: true } });
+        throw new UserError(
+          product
+            ? `Stock insuffisant pour ${product.name} (${product.stock} disponible${product.stock > 1 ? "s" : ""}).`
+            : "Produit introuvable.",
+        );
+      }
+    }
+
+    return tx.order.create({
+      data: {
+        name,
+        phone,
+        quartier,
+        comment,
+        source,
+        estimatedTotal,
+        discountAmount,
+        discountReason,
+        finalTotal,
+        stockReserved: true, // restitué si la commande est annulée ou supprimée
+        status: "CONFIRMEE", // commande admin = déjà confirmée
+        items: {
+          create: items.map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+          })),
+        },
       },
-    },
+    });
   });
 
   revalidatePath("/admin/commandes");
+  revalidatePath("/", "layout"); // stock visible en boutique
   redirect(`/admin/commandes/${order.id}`);
 }
 
