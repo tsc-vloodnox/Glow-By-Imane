@@ -83,10 +83,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
     permanentRedirect(`/produits/${product.slug}`);
   }
 
-  const galleryImages =
-    product.images.length > 0
-      ? product.images.slice(0, 3)
-      : ["/catalogue/placeholder.png"];
+  // Toutes les photos du produit (la galerie était limitée aux 3 premières).
+  // Sans photo : entrée vide → ProductImage affiche son motif de remplacement.
+  const galleryImages = product.images.length > 0 ? product.images : [""];
   // Avec déclinaisons, la dispo dépend du stock des tailles, pas de product.stock
   const isOutOfStock =
     product.sizes.length > 0 ? product.sizes.every((s) => s.stock <= 0) : product.stock <= 0;
