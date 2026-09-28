@@ -38,12 +38,14 @@ export default function CartPageClient() {
               item.activePromotions,
               item.packPrices,
               item.quantity,
+              item.originalPrice,
             );
             const unitPrice = resolveDiscountedUnitPrice(
               item.basePrice,
               item.activePromotions,
               item.packPrices,
               item.quantity,
+              item.originalPrice,
             );
 
             return (

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
 import { ProductAddToCart } from "../../components/ProductAddToCart";
 import { ProductViewTracker } from "../../components/ProductViewTracker";
@@ -11,15 +12,22 @@ import { catalogPath } from "@/lib/images";
 import type { ProductPageProps } from "@/types/types";
 
 // Fetch partagé pour ne pas appeler Prisma deux fois (generateMetadata + page)
-async function getProduct(slug: string) {
+const getProduct = cache(async (slug: string) => {
+  const now = new Date();
   return prisma.product.findUnique({
     where: { id: slug },
     include: {
       category: true,
-      promotions: { include: { promotion: true } },
+      sizes: { where: { archived: false }, orderBy: { position: "asc" } },
+      packPrices: { orderBy: { position: "asc" } },
+      // Uniquement les promotions en cours — mêmes critères que createOrder
+      promotions: {
+        where: { promotion: { active: true, startAt: { lte: now }, endAt: { gte: now } } },
+        include: { promotion: { select: { discountPercent: true } } },
+      },
     },
   });
-}
+});
 
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
   const { slug } = await params;
@@ -69,7 +77,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
     product.images.length > 0
       ? product.images.slice(0, 3)
       : ["/catalogue/placeholder.png"];
-  const isOutOfStock = product.stock <= 0;
+  // Avec déclinaisons, la dispo dépend du stock des tailles, pas de product.stock
+  const isOutOfStock =
+    product.sizes.length > 0 ? product.sizes.every((s) => s.stock <= 0) : product.stock <= 0;
 
   const activePromotions = (product.promotions ?? []).map((p) => ({
     discountPercent: p.promotion.discountPercent,
@@ -146,8 +156,16 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 id: product.id,
                 name: product.name,
                 price: product.price,
+                originalPrice: product.originalPrice,
               }}
               stock={product.stock}
+              activePromotions={activePromotions}
+              sizes={product.sizes.map((s) => ({ id: s.id, label: s.label, price: s.price, stock: s.stock }))}
+              packPrices={product.packPrices.map((p) => ({
+                quantity: p.quantity,
+                price: p.price,
+                productSizeId: p.productSizeId,
+              }))}
             />
             <Link
               href="/"

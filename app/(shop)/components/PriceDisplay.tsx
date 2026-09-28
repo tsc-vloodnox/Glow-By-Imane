@@ -20,7 +20,8 @@ export function PriceDisplay({
   const effective = getEffectiveDiscount(price, originalPrice, activePromotions);
 
   const displayPrice = effective ? effective.discountedPrice : price;
-  const basePrice = price; // prix de référence toujours affiché barré si remise
+  // Prix de référence affiché barré (originalPrice si remise permanente, sinon price)
+  const referencePrice = effective ? effective.referencePrice : price;
 
   const priceClass =
     size === "lg"
@@ -46,7 +47,7 @@ export function PriceDisplay({
         {displayPrice.toLocaleString("fr-GN")} GNF
       </span>
       <span className={originalClass}>
-        {basePrice.toLocaleString("fr-GN")} GNF
+        {referencePrice.toLocaleString("fr-GN")} GNF
       </span>
       <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
         -{effective.discountPercent}%

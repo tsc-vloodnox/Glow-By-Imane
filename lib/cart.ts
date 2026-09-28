@@ -9,6 +9,7 @@ export type CartItem = {
   name: string;
   sizeLabel: string | null;
   basePrice: number; // prix net (remise permanente déjà appliquée), à quantité 1
+  originalPrice: number | null; // prix avant remise permanente — référence des promos (null pour tailles et kits)
   activePromotions: ActivePromotion[]; // promotions temporaires actives, connues au moment de l'ajout
   packPrices: PackPriceRule[]; // vide pour un kit
   quantity: number;
@@ -50,6 +51,7 @@ export function getStoredCartItems(): CartItem[] {
         name: item.name ?? "",
         sizeLabel: item.sizeLabel ?? null,
         basePrice: item.basePrice ?? item.price ?? 0,
+        originalPrice: item.originalPrice ?? null,
         activePromotions: item.activePromotions ?? [],
         packPrices: item.packPrices ?? [],
         quantity: item.quantity ?? 1,
@@ -77,6 +79,7 @@ type AddProductInput = {
   sizeLabel?: string | null;
   name: string;
   basePrice: number;
+  originalPrice?: number | null;
   activePromotions?: ActivePromotion[];
   packPrices?: PackPriceRule[];
   stock: number;
@@ -104,6 +107,8 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
           ? {
               ...item,
               stock: input.stock,
+              basePrice: input.basePrice,
+              originalPrice: input.kind === "product" ? input.originalPrice ?? null : null,
               activePromotions: input.activePromotions ?? item.activePromotions,
               quantity: clamp(item.quantity + quantity, input.stock),
             }
@@ -121,6 +126,7 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
               name: input.name,
               sizeLabel: null,
               basePrice: input.basePrice,
+              originalPrice: null,
               activePromotions: input.activePromotions ?? [],
               packPrices: [],
               quantity: clamp(quantity, input.stock),
@@ -135,6 +141,7 @@ export function addToCart(input: AddProductInput | AddKitInput, quantity = 1) {
               name: input.name,
               sizeLabel: input.sizeLabel ?? null,
               basePrice: input.basePrice,
+              originalPrice: input.originalPrice ?? null,
               activePromotions: input.activePromotions ?? [],
               packPrices: input.packPrices ?? [],
               quantity: clamp(quantity, input.stock),
@@ -171,7 +178,13 @@ export function getCartCount() {
 
 export function getCartTotal(items: CartItem[]) {
   return items.reduce(
-    (sum, item) => sum + resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity),
+    (sum, item) => sum + resolveDiscountedLineTotal(
+        item.basePrice,
+        item.activePromotions,
+        item.packPrices,
+        item.quantity,
+        item.originalPrice,
+      ),
     0,
   );
 }

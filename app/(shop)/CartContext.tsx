@@ -22,6 +22,7 @@ type AddProductArgs = {
   sizeLabel?: string | null;
   name: string;
   basePrice: number;
+  originalPrice?: number | null;
   activePromotions?: ActivePromotion[];
   packPrices?: { quantity: number; price: number }[];
   stock: number;

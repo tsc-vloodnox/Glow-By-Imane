@@ -62,60 +62,56 @@ export function hasDiscount(
 }
 
 /**
- * Résout la remise effective à afficher sur un produit en combinant :
- * - la remise permanente (originalPrice sur le produit)
- * - les promotions temporaires actives (table Promotion)
+ * Prix de référence d'un article : `originalPrice` s'il existe et dépasse `price`
+ * (remise permanente), sinon `price`. C'est le prix affiché barré.
+ */
+export function getReferencePrice(price: number, originalPrice: number | null | undefined): number {
+  return originalPrice && originalPrice > price ? originalPrice : price;
+}
+
+/**
+ * Prix unitaire réellement facturé, promotion active comprise.
  *
- * CORRECTIF : les deux pourcentages sont désormais calculés — et réappliqués —
- * par rapport au même prix de référence (`originalPrice` s'il existe, sinon
- * `price`). Avant, le pourcentage permanent était réappliqué sur `price`
- * (déjà net de remise), ce qui provoquait une double remise. Avec ce calcul,
- * quand la remise permanente l'emporte, le prix affiché retombe bien sur
- * `price` (pas de double remise) ; quand une promo plus avantageuse existe,
- * elle s'applique proprement au prix de référence.
+ * Règle métier : les remises NE SE CUMULENT PAS — on applique la plus
+ * avantageuse pour le client entre :
+ * - la remise permanente (`basePrice`, déjà net, face à `originalPrice`)
+ * - la meilleure promotion temporaire, appliquée au prix de référence
+ *   (`originalPrice` s'il existe, sinon `basePrice`)
  *
- * On applique toujours la plus avantageuse pour le client.
+ * Utilisée à la fois pour l'affichage (PriceDisplay), le panier et la commande
+ * serveur, afin que le prix affiché soit toujours le prix facturé.
+ */
+export function resolveActiveUnitPrice(
+  basePrice: number,
+  activePromotions: ActivePromotion[] = [],
+  originalPrice?: number | null,
+): number {
+  if (activePromotions.length === 0) return basePrice;
+  const promoPercent = Math.max(...activePromotions.map((p) => p.discountPercent));
+  if (promoPercent <= 0) return basePrice;
+  const promoPrice = Math.round(getReferencePrice(basePrice, originalPrice) * (1 - promoPercent / 100));
+  return Math.min(basePrice, promoPrice);
+}
+
+/**
+ * Remise effective à afficher sur un produit (remise permanente ou promotion,
+ * la plus avantageuse — jamais les deux cumulées).
  * Retourne null si aucune remise n'est applicable.
  */
 export function getEffectiveDiscount(
   price: number,
   originalPrice: number | null | undefined,
   activePromotions: ActivePromotion[] = [],
-): { discountedPrice: number; discountPercent: number } | null {
-  const hasPermanent = !!originalPrice && originalPrice > price;
-  const referencePrice = hasPermanent ? (originalPrice as number) : price;
-
-  const permanentPercent = hasPermanent
-    ? Math.round((1 - price / (originalPrice as number)) * 100)
-    : 0;
-
-  const promoPercent =
-    activePromotions.length > 0
-      ? Math.max(...activePromotions.map((p) => p.discountPercent))
-      : 0;
-
-  const best = Math.max(permanentPercent, promoPercent);
-  if (best <= 0) return null;
+): { discountedPrice: number; referencePrice: number; discountPercent: number } | null {
+  const referencePrice = getReferencePrice(price, originalPrice);
+  const discountedPrice = resolveActiveUnitPrice(price, activePromotions, originalPrice);
+  if (discountedPrice >= referencePrice) return null;
 
   return {
-    discountPercent: best,
-    discountedPrice: Math.round(referencePrice * (1 - best / 100)),
+    discountedPrice,
+    referencePrice,
+    discountPercent: Math.round((1 - discountedPrice / referencePrice) * 100),
   };
-}
-
-/**
- * Prix unitaire réellement facturé côté panier/commande : `basePrice` (ex.
- * product.price / kit.price) est déjà net de remise permanente — seule une
- * promotion active vient réduire davantage ce prix ici.
- */
-export function resolveActiveUnitPrice(
-  basePrice: number,
-  activePromotions: ActivePromotion[] = [],
-): number {
-  if (activePromotions.length === 0) return basePrice;
-  const promoPercent = Math.max(...activePromotions.map((p) => p.discountPercent));
-  if (promoPercent <= 0) return basePrice;
-  return Math.round(basePrice * (1 - promoPercent / 100));
 }
 
 /**
@@ -127,8 +123,9 @@ export function resolveDiscountedLineTotal(
   activePromotions: ActivePromotion[],
   packPrices: PackPriceRule[],
   quantity: number,
+  originalPrice?: number | null,
 ): number {
-  const unitPrice = resolveActiveUnitPrice(basePrice, activePromotions);
+  const unitPrice = resolveActiveUnitPrice(basePrice, activePromotions, originalPrice);
   return resolveLineTotal(unitPrice, packPrices, quantity);
 }
 
@@ -138,7 +135,10 @@ export function resolveDiscountedUnitPrice(
   activePromotions: ActivePromotion[],
   packPrices: PackPriceRule[],
   quantity: number,
+  originalPrice?: number | null,
 ): number {
-  if (quantity <= 0) return resolveActiveUnitPrice(basePrice, activePromotions);
-  return Math.round(resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity) / quantity);
+  if (quantity <= 0) return resolveActiveUnitPrice(basePrice, activePromotions, originalPrice);
+  return Math.round(
+    resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity, originalPrice) / quantity,
+  );
 }

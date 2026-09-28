@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
+import { MAX_ORDER_LINES, parseOrderInput } from "@/lib/order-validation";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { CartItemInput, OrderInput } from "@/types/types";
 import type { CartItem } from "@/lib/cart";
 
@@ -19,12 +21,29 @@ function activePromotionsFor(
     .map((pp) => ({ discountPercent: pp.promotion.discountPercent }));
 }
 
-export async function createOrder(data: OrderInput) {
-  if (data.items.length === 0) {
-    throw new Error("Le panier est vide.");
+// Anti-spam : limites volontairement larges pour ne jamais gêner une vraie cliente
+const ORDER_LIMIT_PER_IP = 5;
+const ORDER_LIMIT_PER_PHONE = 3;
+const ORDER_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const TOO_MANY_ORDERS =
+  "Trop de commandes envoyées en peu de temps. Merci de patienter quelques minutes ou de nous contacter sur WhatsApp.";
+
+export async function createOrder(rawData: OrderInput) {
+  // Les server actions sont appelables avec n'importe quel payload : on revalide tout.
+  const data = parseOrderInput(rawData);
+
+  if (!checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS)) {
+    throw new Error(TOO_MANY_ORDERS);
   }
 
   const now = new Date();
+
+  const recentOrdersForPhone = await prisma.order.count({
+    where: { phone: data.phone, createdAt: { gte: new Date(now.getTime() - ORDER_LIMIT_WINDOW_MS) } },
+  });
+  if (recentOrdersForPhone >= ORDER_LIMIT_PER_PHONE) {
+    throw new Error(TOO_MANY_ORDERS);
+  }
 
   const order = await prisma.$transaction(async (tx) => {
     const productItems = data.items.filter(
@@ -72,8 +91,15 @@ export async function createOrder(data: OrderInput) {
 
       // Les promotions sont définies au niveau du produit ; pas de promo par taille dans le schéma actuel.
       const activePromotions = size ? [] : activePromotionsFor(product, now);
+      const originalPrice = size ? null : product.originalPrice;
 
-      const lineTotal = resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, item.quantity);
+      const lineTotal = resolveDiscountedLineTotal(
+        basePrice,
+        activePromotions,
+        packPrices,
+        item.quantity,
+        originalPrice,
+      );
       estimatedTotal += lineTotal;
 
       orderItemsData.push({
@@ -201,6 +227,9 @@ export async function createOrder(data: OrderInput) {
  * pour détecter fidèlement tout changement de prix, de stock ou de promotion.
  */
 export async function refreshCartPrices(items: CartItem[]) {
+  if (!Array.isArray(items) || items.length > MAX_ORDER_LINES) {
+    throw new Error("Panier invalide.");
+  }
   if (items.length === 0) {
     return { items: [] as CartItem[], priceChanged: false, removedKeys: [] as string[] };
   }
@@ -230,7 +259,13 @@ export async function refreshCartPrices(items: CartItem[]) {
 
   const refreshedItems = items
     .map((item) => {
-      const oldTotal = resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity);
+      const oldTotal = resolveDiscountedLineTotal(
+        item.basePrice,
+        item.activePromotions,
+        item.packPrices,
+        item.quantity,
+        item.originalPrice,
+      );
 
       if (item.kind === "kit") {
         const kit = kitMap.get(item.kitId!);
@@ -249,6 +284,7 @@ export async function refreshCartPrices(items: CartItem[]) {
           ...item,
           name: kit.name,
           basePrice: kit.price,
+          originalPrice: null,
           activePromotions: [] as ActivePromotion[], // pas de promo sur les kits dans le schéma actuel
           packPrices: [],
           quantity,
@@ -276,15 +312,19 @@ export async function refreshCartPrices(items: CartItem[]) {
         .filter((p) => p.productSizeId === (size ? size.id : null))
         .map((p) => ({ quantity: p.quantity, price: p.price }));
       const activePromotions = size ? [] : activePromotionsFor(product, now);
+      const originalPrice = size ? null : product.originalPrice;
 
       const quantity = Math.min(item.quantity, Math.max(stock, 0));
-      if (resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity) !== oldTotal) priceChanged = true;
+      if (resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity, originalPrice) !== oldTotal) {
+        priceChanged = true;
+      }
 
       return {
         ...item,
         name: size ? `${product.name} — ${size.label}` : product.name,
         sizeLabel: size ? size.label : null,
         basePrice,
+        originalPrice,
         activePromotions,
         packPrices,
         quantity,

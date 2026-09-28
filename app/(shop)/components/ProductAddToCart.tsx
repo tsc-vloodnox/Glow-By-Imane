@@ -3,19 +3,26 @@
 import { useMemo, useState } from "react";
 
 import { useCart } from "../CartContext";
-import { resolveUnitPrice } from "@/lib/pricing";
+import { resolveDiscountedUnitPrice, type ActivePromotion } from "@/lib/pricing";
 
 type SizeOption = { id: string; label: string; price: number; stock: number };
 type PackPriceOption = { quantity: number; price: number; productSizeId: string | null };
 
 type ProductAddToCartProps = {
-  product: { id: string; name: string; price: number };
+  product: { id: string; name: string; price: number; originalPrice?: number | null };
   stock: number;
+  activePromotions?: ActivePromotion[];
   sizes?: SizeOption[];
   packPrices?: PackPriceOption[];
 };
 
-export function ProductAddToCart({ product, stock, sizes = [], packPrices = [] }: ProductAddToCartProps) {
+export function ProductAddToCart({
+  product,
+  stock,
+  activePromotions = [],
+  sizes = [],
+  packPrices = [],
+}: ProductAddToCartProps) {
   const { addItem } = useCart();
   const hasSizes = sizes.length > 0;
   const [selectedSizeId, setSelectedSizeId] = useState<string | null>(hasSizes ? sizes[0].id : null);
@@ -35,7 +42,17 @@ export function ProductAddToCart({ product, stock, sizes = [], packPrices = [] }
     [packPrices, selectedSize],
   );
 
-  const unitPrice = resolveUnitPrice(basePrice, applicablePackPrices, quantity);
+  // Promotions et remise permanente : produit sans taille uniquement (comme côté serveur)
+  const applicablePromotions = selectedSize ? [] : activePromotions;
+  const originalPrice = selectedSize ? null : product.originalPrice ?? null;
+
+  const unitPrice = resolveDiscountedUnitPrice(
+    basePrice,
+    applicablePromotions,
+    applicablePackPrices,
+    quantity,
+    originalPrice,
+  );
 
   const decrease = () => setQuantity((q) => Math.max(1, q - 1));
   const increase = () => setQuantity((q) => Math.min(activeStock, q + 1));
@@ -55,6 +72,8 @@ export function ProductAddToCart({ product, stock, sizes = [], packPrices = [] }
         sizeLabel: selectedSize ? selectedSize.label : null,
         name: selectedSize ? `${product.name} — ${selectedSize.label}` : product.name,
         basePrice,
+        originalPrice,
+        activePromotions: applicablePromotions,
         packPrices: applicablePackPrices,
         stock: activeStock,
       },
