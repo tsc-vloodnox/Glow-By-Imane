@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
+import { UserError, withActionResult } from "@/lib/action-result";
 
 // ─── Helpers revalidation ────────────────────────────────────────────────────
 
@@ -68,7 +69,7 @@ function parseProductFormData(formData: FormData) {
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
   if (!name || !categoryId || Number.isNaN(price) || Number.isNaN(stock)) {
-    throw new Error("Informations invalides.");
+    throw new UserError("Informations invalides.");
   }
 
   const sizes = parseJsonField<SizeInput[]>(formData.get("sizes"), []).filter(
@@ -185,7 +186,7 @@ const productWithPricingInclude = {
   packPrices: { orderBy: { position: "asc" as const } },
 };
 
-export async function createProduct(formData: FormData) {
+async function createProductImpl(formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
@@ -202,7 +203,7 @@ export async function createProduct(formData: FormData) {
   });
 }
 
-export async function updateProduct(productId: string, formData: FormData) {
+async function updateProductImpl(productId: string, formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
@@ -225,7 +226,7 @@ export async function updateProduct(productId: string, formData: FormData) {
  * Soft delete — archive le produit au lieu de le supprimer.
  * Préserve l'historique des commandes passées (OrderItem → Product).
  */
-export async function archiveProduct(productId: string) {
+async function archiveProductImpl(productId: string) {
   await requireAdmin();
   await prisma.product.update({
     where: { id: productId },
@@ -238,7 +239,7 @@ export async function archiveProduct(productId: string) {
 /**
  * Restaure un produit archivé.
  */
-export async function restoreProduct(productId: string) {
+async function restoreProductImpl(productId: string) {
   await requireAdmin();
   await prisma.product.update({
     where: { id: productId },
@@ -251,12 +252,12 @@ export async function restoreProduct(productId: string) {
 /**
  * Suppression définitive — uniquement pour les produits sans commandes.
  */
-export async function deleteProduct(productId: string) {
+async function deleteProductImpl(productId: string) {
   await requireAdmin();
 
   const hasOrders = await prisma.orderItem.count({ where: { productId } });
   if (hasOrders > 0) {
-    throw new Error(
+    throw new UserError(
       "Ce produit a des commandes associées. Archivez-le plutôt que de le supprimer.",
     );
   }
@@ -283,7 +284,7 @@ function parseKitFormData(formData: FormData) {
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
   if (!name || Number.isNaN(price)) {
-    throw new Error("Informations invalides.");
+    throw new UserError("Informations invalides.");
   }
 
   const items = parseJsonField<KitItemInput[]>(formData.get("items"), []).filter(
@@ -332,7 +333,7 @@ const kitWithItemsInclude = {
   },
 };
 
-export async function createKit(formData: FormData) {
+async function createKitImpl(formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
@@ -348,7 +349,7 @@ export async function createKit(formData: FormData) {
   });
 }
 
-export async function updateKit(kitId: string, formData: FormData) {
+async function updateKitImpl(kitId: string, formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
@@ -367,7 +368,7 @@ export async function updateKit(kitId: string, formData: FormData) {
 /**
  * Soft delete — archive le kit au lieu de le supprimer.
  */
-export async function archiveKit(kitId: string) {
+async function archiveKitImpl(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: true } });
   revalidatePath("/admin/kits");
@@ -377,7 +378,7 @@ export async function archiveKit(kitId: string) {
 /**
  * Restaure un kit archivé.
  */
-export async function restoreKit(kitId: string) {
+async function restoreKitImpl(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: false } });
   revalidatePath("/admin/kits");
@@ -387,12 +388,12 @@ export async function restoreKit(kitId: string) {
 /**
  * Suppression définitive — uniquement pour les kits sans commandes.
  */
-export async function deleteKit(kitId: string) {
+async function deleteKitImpl(kitId: string) {
   await requireAdmin();
 
   const hasOrders = await prisma.orderItem.count({ where: { kitId } });
   if (hasOrders > 0) {
-    throw new Error("Ce kit a des commandes associées. Archivez-le plutôt que de le supprimer.");
+    throw new UserError("Ce kit a des commandes associées. Archivez-le plutôt que de le supprimer.");
   }
 
   await prisma.kitItem.deleteMany({ where: { kitId } });
@@ -403,7 +404,7 @@ export async function deleteKit(kitId: string) {
 
 // ─── Livraisons ───────────────────────────────────────────────────────────────
 
-export async function createDelivery(formData: FormData) {
+async function createDeliveryImpl(formData: FormData) {
   await requireAdmin();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
@@ -413,7 +414,7 @@ export async function createDelivery(formData: FormData) {
   const deliveryFee = Math.max(0, Number(formData.get("deliveryFee") ?? 0));
 
   if (!orderId || !scheduledAt) {
-    throw new Error("Commande et date de livraison requises.");
+    throw new UserError("Commande et date de livraison requises.");
   }
 
   await prisma.delivery.create({
@@ -431,35 +432,47 @@ export async function createDelivery(formData: FormData) {
   revalidatePath(`/admin/commandes/${orderId}`);
 }
 
-export async function updateDeliveryStatus(
+async function updateDeliveryStatusImpl(
   deliveryId: string,
   status: "PLANIFIEE" | "EN_COURS" | "LIVREE" | "ECHOUEE" | "REPORTEE",
 ) {
   await requireAdmin();
 
-  const delivery = await prisma.delivery.update({
+  const current = await prisma.delivery.findUniqueOrThrow({
     where: { id: deliveryId },
-    data: {
-      status,
-      deliveredAt: status === "LIVREE" ? new Date() : undefined,
-    },
+    select: { order: { select: { status: true } } },
   });
-
-  // La commande suit automatiquement le statut "Livrée" de sa livraison —
-  // évite d'avoir à mettre à jour les deux statuts séparément.
-  if (status === "LIVREE") {
-    await prisma.order.update({
-      where: { id: delivery.orderId },
-      data: { status: "LIVREE" },
-    });
+  if (current.order.status === "ANNULEE") {
+    throw new UserError("Cette commande est annulée : sa livraison ne peut plus changer de statut.");
   }
+
+  const delivery = await prisma.$transaction(async (tx) => {
+    const updated = await tx.delivery.update({
+      where: { id: deliveryId },
+      data: {
+        status,
+        deliveredAt: status === "LIVREE" ? new Date() : undefined,
+      },
+    });
+
+    // La commande suit automatiquement le statut "Livrée" de sa livraison —
+    // évite d'avoir à mettre à jour les deux statuts séparément.
+    if (status === "LIVREE") {
+      await tx.order.update({
+        where: { id: updated.orderId },
+        data: { status: "LIVREE" },
+      });
+    }
+
+    return updated;
+  });
 
   revalidatePath("/admin/livraisons");
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${delivery.orderId}`);
 }
 
-export async function updateDelivery(deliveryId: string, formData: FormData) {
+async function updateDeliveryImpl(deliveryId: string, formData: FormData) {
   await requireAdmin();
 
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
@@ -484,7 +497,7 @@ export async function updateDelivery(deliveryId: string, formData: FormData) {
  * Assigne (ou retire, si livreurId est null) un livreur à un lot de livraisons.
  * C'est le cœur du flux "sélectionner des commandes et les attribuer à un livreur".
  */
-export async function assignLivreur(deliveryIds: string[], livreurId: string | null) {
+async function assignLivreurImpl(deliveryIds: string[], livreurId: string | null) {
   await requireAdmin();
 
   if (deliveryIds.length === 0) return;
@@ -500,7 +513,7 @@ export async function assignLivreur(deliveryIds: string[], livreurId: string | n
 /**
  * Crée un nouveau livreur à la volée (depuis la barre d'assignation par exemple).
  */
-export async function createLivreur(formData: FormData) {
+async function createLivreurImpl(formData: FormData) {
   await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -508,7 +521,7 @@ export async function createLivreur(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
   if (!name || !phone) {
-    throw new Error("Nom et téléphone du livreur requis.");
+    throw new UserError("Nom et téléphone du livreur requis.");
   }
 
   const livreur = await prisma.livreur.create({ data: { name, phone, notes } });
@@ -521,7 +534,7 @@ export async function createLivreur(formData: FormData) {
 /**
  * Met à jour les informations d'un livreur (nom, téléphone, notes).
  */
-export async function updateLivreur(livreurId: string, formData: FormData) {
+async function updateLivreurImpl(livreurId: string, formData: FormData) {
   await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -529,7 +542,7 @@ export async function updateLivreur(livreurId: string, formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
   if (!name || !phone) {
-    throw new Error("Nom et téléphone du livreur requis.");
+    throw new UserError("Nom et téléphone du livreur requis.");
   }
 
   await prisma.livreur.update({ where: { id: livreurId }, data: { name, phone, notes } });
@@ -542,7 +555,7 @@ export async function updateLivreur(livreurId: string, formData: FormData) {
  * Active/désactive un livreur (désactivé = n'apparaît plus dans le sélecteur
  * d'assignation, mais reste visible sur les livraisons déjà attribuées).
  */
-export async function toggleLivreurActive(livreurId: string, active: boolean) {
+async function toggleLivreurActiveImpl(livreurId: string, active: boolean) {
   await requireAdmin();
   await prisma.livreur.update({ where: { id: livreurId }, data: { active } });
   revalidatePath("/admin/livraisons");
@@ -553,11 +566,11 @@ export async function toggleLivreurActive(livreurId: string, active: boolean) {
  * Met à jour les frais de livraison convenus pour une livraison (champ isolé,
  * modifiable en ligne depuis la vue livraisons sans repasser par updateDelivery).
  */
-export async function updateDeliveryFee(deliveryId: string, deliveryFee: number) {
+async function updateDeliveryFeeImpl(deliveryId: string, deliveryFee: number) {
   await requireAdmin();
 
   if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
-    throw new Error("Frais de livraison invalides.");
+    throw new UserError("Frais de livraison invalides.");
   }
 
   const delivery = await prisma.delivery.update({
@@ -569,3 +582,27 @@ export async function updateDeliveryFee(deliveryId: string, deliveryFee: number)
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${delivery.orderId}`);
 }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// Enveloppées par withActionResult : renvoient { ok, data | error } au lieu de lever
+// une erreur, dont le message serait masqué par Next.js en production.
+// Côté client : const x = unwrapAction(xAction) — cf. lib/action-result.ts
+
+export const createProduct = withActionResult(createProductImpl);
+export const updateProduct = withActionResult(updateProductImpl);
+export const archiveProduct = withActionResult(archiveProductImpl);
+export const restoreProduct = withActionResult(restoreProductImpl);
+export const deleteProduct = withActionResult(deleteProductImpl);
+export const createKit = withActionResult(createKitImpl);
+export const updateKit = withActionResult(updateKitImpl);
+export const archiveKit = withActionResult(archiveKitImpl);
+export const restoreKit = withActionResult(restoreKitImpl);
+export const deleteKit = withActionResult(deleteKitImpl);
+export const createDelivery = withActionResult(createDeliveryImpl);
+export const updateDeliveryStatus = withActionResult(updateDeliveryStatusImpl);
+export const updateDelivery = withActionResult(updateDeliveryImpl);
+export const assignLivreur = withActionResult(assignLivreurImpl);
+export const createLivreur = withActionResult(createLivreurImpl);
+export const updateLivreur = withActionResult(updateLivreurImpl);
+export const toggleLivreurActive = withActionResult(toggleLivreurActiveImpl);
+export const updateDeliveryFee = withActionResult(updateDeliveryFeeImpl);

@@ -4,6 +4,7 @@
 // on ne fait JAMAIS confiance aux types TypeScript côté serveur.
 
 import type { CartItemInput, GiftInput, OrderInput } from "@/types/types";
+import { UserError } from "@/lib/action-result";
 
 /** Numéro guinéen : 6XXXXXXXX, avec ou sans indicatif 224 / +224 (espaces retirés avant test). */
 export const GUINEA_PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
@@ -15,7 +16,7 @@ export const MAX_ORDER_LINES = 30;
 export const MAX_LINE_QUANTITY = 50;
 
 function fail(message: string): never {
-  throw new Error(message);
+  throw new UserError(message);
 }
 
 function requiredString(value: unknown, label: string, maxLength: number): string {

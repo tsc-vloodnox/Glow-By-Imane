@@ -5,8 +5,14 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createProduct, updateProduct } from "../actions";
-import { uploadProductImage } from "./upload";
+import { createProduct as createProductAction, updateProduct as updateProductAction } from "../actions";
+import { uploadProductImage as uploadProductImageAction } from "./upload";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createProduct = unwrapAction(createProductAction);
+const updateProduct = unwrapAction(updateProductAction);
+const uploadProductImage = unwrapAction(uploadProductImageAction);
 
 type SizeInput = {
   id: string;

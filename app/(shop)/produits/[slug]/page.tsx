@@ -11,6 +11,9 @@ import { prisma } from "@/lib/prisma";
 import { catalogPath } from "@/lib/images";
 import type { ProductPageProps } from "@/types/types";
 
+// Promotions et stock rafraîchis au plus toutes les 60 s
+export const revalidate = 60;
+
 // Fetch partagé pour ne pas appeler Prisma deux fois (generateMetadata + page)
 const getProduct = cache(async (slug: string) => {
   const now = new Date();

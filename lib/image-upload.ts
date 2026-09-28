@@ -5,6 +5,7 @@
 import { randomUUID } from "crypto";
 
 import { createServiceClient } from "@/lib/supabase/server";
+import { UserError } from "@/lib/action-result";
 
 const BUCKET = "catalogue";
 export const MAX_IMAGE_SIZE_MB = 5;
@@ -37,11 +38,11 @@ export function detectImageMime(buffer: Buffer): string | null {
  */
 export async function uploadImageToCatalogue(file: File, options: { prefix?: string } = {}): Promise<string> {
   if (!(file instanceof File) || file.size === 0) {
-    throw new Error("Aucune image reçue.");
+    throw new UserError("Aucune image reçue.");
   }
 
   if (file.size > MAX_IMAGE_SIZE_BYTES) {
-    throw new Error(
+    throw new UserError(
       `Image trop lourde (${(file.size / 1024 / 1024).toFixed(1)} Mo). Maximum : ${MAX_IMAGE_SIZE_MB} Mo.`,
     );
   }
@@ -49,7 +50,7 @@ export async function uploadImageToCatalogue(file: File, options: { prefix?: str
   const buffer = Buffer.from(await file.arrayBuffer());
   const mime = detectImageMime(buffer);
   if (!mime) {
-    throw new Error("Format d'image non supporté. Formats acceptés : JPEG, PNG, WebP, GIF.");
+    throw new UserError("Format d'image non supporté. Formats acceptés : JPEG, PNG, WebP, GIF.");
   }
 
   const fileName = `${options.prefix ? `${options.prefix}/` : ""}${randomUUID()}.${MIME_TO_EXT[mime]}`;
@@ -59,7 +60,7 @@ export async function uploadImageToCatalogue(file: File, options: { prefix?: str
     .upload(fileName, buffer, { contentType: mime, upsert: false });
 
   if (error) {
-    throw new Error(`Échec de l'upload : ${error.message}`);
+    throw new UserError(`Échec de l'upload : ${error.message}`);
   }
 
   return fileName;

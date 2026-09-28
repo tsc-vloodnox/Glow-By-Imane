@@ -2,18 +2,21 @@
 import { prisma } from "@/lib/prisma";
 import { ShopPageClient } from "./components/ShopPageClient";
 
-const now = new Date();
-
-// Filtre réutilisable : ne récupère que les promotions en cours
-const activePromoWhere = {
-  promotion: {
-    active: true,
-    startAt: { lte: now },
-    endAt: { gte: now },
-  },
-};
+// Régénère la page au plus toutes les 60 s : les promotions démarrent/expirent
+// à l'heure prévue et le stock reste frais, sans attendre une action admin.
+export const revalidate = 60;
 
 export default async function ShopPage() {
+  // Calculé à chaque rendu (et non au chargement du module, où il restait figé)
+  const now = new Date();
+  const activePromoWhere = {
+    promotion: {
+      active: true,
+      startAt: { lte: now },
+      endAt: { gte: now },
+    },
+  };
+
   const [products, categories, kits] = await Promise.all([
     prisma.product.findMany({
       where: { archived: false },

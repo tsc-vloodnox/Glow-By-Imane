@@ -5,8 +5,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import { archiveProduct, deleteProduct, restoreProduct, updateProduct } from "../actions";
-import { uploadProductImage } from "./upload";
+import {
+  archiveProduct as archiveProductAction,
+  deleteProduct as deleteProductAction,
+  restoreProduct as restoreProductAction,
+  updateProduct as updateProductAction,
+} from "../actions";
+import { uploadProductImage as uploadProductImageAction } from "./upload";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const archiveProduct = unwrapAction(archiveProductAction);
+const deleteProduct = unwrapAction(deleteProductAction);
+const restoreProduct = unwrapAction(restoreProductAction);
+const updateProduct = unwrapAction(updateProductAction);
+const uploadProductImage = unwrapAction(uploadProductImageAction);
 
 type ProductSizeRow = {
   id: string; // id réel si existant, "tmp_..." si pas encore enregistré
@@ -365,19 +378,29 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
   }
 
   async function handleArchive(productId: string) {
+    setActionError(null);
     startTransition(async () => {
-      await archiveProduct(productId);
-      setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: true, favorite: false } : p)));
-      setSavedProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: true, favorite: false } : p)));
-      setConfirmArchiveId(null);
+      try {
+        await archiveProduct(productId);
+        setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: true, favorite: false } : p)));
+        setSavedProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: true, favorite: false } : p)));
+        setConfirmArchiveId(null);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Erreur lors de l'archivage.");
+      }
     });
   }
 
   async function handleRestore(productId: string) {
+    setActionError(null);
     startTransition(async () => {
-      await restoreProduct(productId);
-      setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: false } : p)));
-      setSavedProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: false } : p)));
+      try {
+        await restoreProduct(productId);
+        setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: false } : p)));
+        setSavedProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, archived: false } : p)));
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Erreur lors de la restauration.");
+      }
     });
   }
 

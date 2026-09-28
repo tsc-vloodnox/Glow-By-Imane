@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { deleteProduct } from "../actions";
+import { deleteProduct as deleteProductAction } from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const deleteProduct = unwrapAction(deleteProductAction);
 
 type DeleteProductButtonProps = {
   productId: string;
@@ -20,8 +24,13 @@ export function DeleteProductButton({ productId }: DeleteProductButtonProps) {
     }
 
     setIsDeleting(true);
-    await deleteProduct(productId);
-    router.refresh();
+    try {
+      await deleteProduct(productId);
+      router.refresh();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Erreur lors de la suppression.");
+      setIsDeleting(false);
+    }
   }
 
   return (

@@ -3,8 +3,21 @@
 import Image from "next/image";
 import { useState, useTransition } from "react";
 
-import { archiveKit, deleteKit, restoreKit, updateKit } from "../actions";
-import { uploadProductImage } from "../produits/upload";
+import {
+  archiveKit as archiveKitAction,
+  deleteKit as deleteKitAction,
+  restoreKit as restoreKitAction,
+  updateKit as updateKitAction,
+} from "../actions";
+import { uploadProductImage as uploadProductImageAction } from "../produits/upload";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const archiveKit = unwrapAction(archiveKitAction);
+const deleteKit = unwrapAction(deleteKitAction);
+const restoreKit = unwrapAction(restoreKitAction);
+const updateKit = unwrapAction(updateKitAction);
+const uploadProductImage = unwrapAction(uploadProductImageAction);
 
 type KitItemRow = {
   id: string; // id réel si existant, "tmp_..." si pas encore enregistré
@@ -218,19 +231,29 @@ export function AdminKitsTable({ initialKits, products, storageBaseUrl }: AdminK
   }
 
   async function handleArchive(kitId: string) {
+    setActionError(null);
     startTransition(async () => {
-      await archiveKit(kitId);
-      setKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: true } : k)));
-      setSavedKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: true } : k)));
-      setConfirmArchiveId(null);
+      try {
+        await archiveKit(kitId);
+        setKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: true } : k)));
+        setSavedKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: true } : k)));
+        setConfirmArchiveId(null);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Erreur lors de l'archivage.");
+      }
     });
   }
 
   async function handleRestore(kitId: string) {
+    setActionError(null);
     startTransition(async () => {
-      await restoreKit(kitId);
-      setKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: false } : k)));
-      setSavedKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: false } : k)));
+      try {
+        await restoreKit(kitId);
+        setKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: false } : k)));
+        setSavedKits((prev) => prev.map((k) => (k.id === kitId ? { ...k, archived: false } : k)));
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "Erreur lors de la restauration.");
+      }
     });
   }
 

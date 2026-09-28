@@ -9,6 +9,8 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
 import { GIFT_LINK_EXPIRY_DAYS, giftCardUrl } from "@/lib/gift-card";
+import { releaseOrderStock } from "@/lib/stock";
+import { UserError, withActionResult } from "@/lib/action-result";
 
 export type OrderStatusValue =
   | "NOUVELLE"
@@ -21,7 +23,7 @@ export type OrderStatusValue =
 
 // ─── Statut ──────────────────────────────────────────────────────────────────
 
-export async function updateOrderStatus(orderId: string, status: OrderStatusValue) {
+async function updateOrderStatusImpl(orderId: string, status: OrderStatusValue) {
   await requireAdmin();
 
   const order = await prisma.order.findUniqueOrThrow({
@@ -32,18 +34,33 @@ export async function updateOrderStatus(orderId: string, status: OrderStatusValu
   const allowedNext = ORDER_STATUS_CONFIG[order.status as OrderStatusValue]
     .next as readonly string[];
   if (!allowedNext.includes(status)) {
-    throw new Error(`Transition de statut invalide : ${order.status} → ${status}.`);
+    throw new UserError(`Transition de statut invalide : ${order.status} → ${status}.`);
   }
 
-  await prisma.order.update({ where: { id: orderId }, data: { status } });
+  await prisma.$transaction(async (tx) => {
+    // Mise à jour conditionnelle : échoue si le statut a changé entre-temps (autre onglet, double clic)
+    const updated = await tx.order.updateMany({
+      where: { id: orderId, status: order.status },
+      data: { status },
+    });
+    if (updated.count === 0) {
+      throw new UserError("La commande a été modifiée entre-temps. Rechargez la page.");
+    }
+
+    // Annulation → les articles réservés retournent en stock
+    if (status === "ANNULEE") {
+      await releaseOrderStock(tx, orderId);
+    }
+  });
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${orderId}`);
   revalidatePath("/admin/livraisons");
+  if (status === "ANNULEE") revalidatePath("/", "layout"); // stock visible en boutique
 }
 
 // ─── Remise ──────────────────────────────────────────────────────────────────
 
-export async function updateOrderDiscount(orderId: string, formData: FormData) {
+async function updateOrderDiscountImpl(orderId: string, formData: FormData) {
   await requireAdmin();
 
   const discountAmount = Math.max(0, Number(formData.get("discountAmount") ?? 0));
@@ -63,7 +80,7 @@ export async function updateOrderDiscount(orderId: string, formData: FormData) {
 
 // ─── Création admin (commandes WhatsApp / hors-app) ──────────────────────────
 
-export async function createAdminOrder(formData: FormData) {
+async function createAdminOrderImpl(formData: FormData) {
   await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -80,7 +97,7 @@ export async function createAdminOrder(formData: FormData) {
     JSON.parse(itemsRaw);
 
   if (!name || !phone || !quartier || items.length === 0) {
-    throw new Error("Informations manquantes.");
+    throw new UserError("Informations manquantes.");
   }
 
   const estimatedTotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
@@ -114,34 +131,40 @@ export async function createAdminOrder(formData: FormData) {
 
 // ─── Suppression en masse ─────────────────────────────────────────────────────
 
-export async function deleteAllOrders(statusFilter?: OrderStatusValue) {
+async function deleteAllOrdersImpl(statusFilter?: OrderStatusValue) {
   await requireAdmin();
 
   const where = statusFilter ? { status: statusFilter } : {};
 
-  // Supprime d'abord les livraisons et cartes cadeau liées (contrainte FK)
-  await prisma.delivery.deleteMany({
-    where: { order: where },
-  });
-  await prisma.giftCard.deleteMany({
-    where: { order: where },
-  });
+  await prisma.$transaction(
+    async (tx) => {
+      // Une commande supprimée avant livraison libère son stock réservé.
+      // Les commandes livrées ont réellement consommé leur stock : rien à restituer.
+      const toRelease = await tx.order.findMany({
+        where: { ...where, stockReserved: true, status: { not: "LIVREE" } },
+        select: { id: true },
+      });
+      for (const { id } of toRelease) {
+        await releaseOrderStock(tx, id);
+      }
 
-  // Supprime les items
-  await prisma.orderItem.deleteMany({
-    where: { order: where },
-  });
-
-  // Supprime les commandes
-  await prisma.order.deleteMany({ where });
+      // Supprime d'abord les livraisons, cartes cadeau et items liés (contraintes FK)
+      await tx.delivery.deleteMany({ where: { order: where } });
+      await tx.giftCard.deleteMany({ where: { order: where } });
+      await tx.orderItem.deleteMany({ where: { order: where } });
+      await tx.order.deleteMany({ where });
+    },
+    { timeout: 30_000 },
+  );
 
   revalidatePath("/admin/commandes");
   revalidatePath("/admin/livraisons");
+  revalidatePath("/", "layout"); // stock visible en boutique
 }
 
 // ─── Carte cadeau ─────────────────────────────────────────────────────────────
 
-export async function updateGiftCard(orderId: string, formData: FormData) {
+async function updateGiftCardImpl(orderId: string, formData: FormData) {
   await requireAdmin();
 
   const recipientName = String(formData.get("recipientName") ?? "").trim();
@@ -150,7 +173,7 @@ export async function updateGiftCard(orderId: string, formData: FormData) {
   const message = String(formData.get("message") ?? "").trim() || null;
 
   if (!recipientName || !recipientPhone || !recipientAddress) {
-    throw new Error("Nom, téléphone et adresse du destinataire requis.");
+    throw new UserError("Nom, téléphone et adresse du destinataire requis.");
   }
 
   await prisma.giftCard.update({
@@ -161,13 +184,13 @@ export async function updateGiftCard(orderId: string, formData: FormData) {
   revalidatePath(`/admin/commandes/${orderId}`);
 }
 
-export async function updateGiftCardPhoto(orderId: string, photo: string) {
+async function updateGiftCardPhotoImpl(orderId: string, photo: string) {
   await requireAdmin();
   await prisma.giftCard.update({ where: { orderId }, data: { photo } });
   revalidatePath(`/admin/commandes/${orderId}`);
 }
 
-export async function publishGiftCard(orderId: string) {
+async function publishGiftCardImpl(orderId: string) {
   await requireAdmin();
 
   const existing = await prisma.giftCard.findUniqueOrThrow({ where: { orderId } });
@@ -187,7 +210,7 @@ export async function publishGiftCard(orderId: string) {
   return giftCardUrl(token);
 }
 
-export async function unpublishGiftCard(orderId: string) {
+async function unpublishGiftCardImpl(orderId: string) {
   await requireAdmin();
 
   const giftCard = await prisma.giftCard.update({
@@ -199,3 +222,17 @@ export async function unpublishGiftCard(orderId: string) {
   revalidatePath("/admin/commandes");
   if (giftCard.token) revalidatePath(`/cadeau/${giftCard.token}`);
 }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// Enveloppées par withActionResult : renvoient { ok, data | error } au lieu de lever
+// une erreur, dont le message serait masqué par Next.js en production.
+// Côté client : const x = unwrapAction(xAction) — cf. lib/action-result.ts
+
+export const updateOrderStatus = withActionResult(updateOrderStatusImpl);
+export const updateOrderDiscount = withActionResult(updateOrderDiscountImpl);
+export const createAdminOrder = withActionResult(createAdminOrderImpl);
+export const deleteAllOrders = withActionResult(deleteAllOrdersImpl);
+export const updateGiftCard = withActionResult(updateGiftCardImpl);
+export const updateGiftCardPhoto = withActionResult(updateGiftCardPhotoImpl);
+export const publishGiftCard = withActionResult(publishGiftCardImpl);
+export const unpublishGiftCard = withActionResult(unpublishGiftCardImpl);

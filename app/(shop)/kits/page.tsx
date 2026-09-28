@@ -4,6 +4,9 @@ import Link from "next/link";
 import { KitCard } from "../components/KitCard";
 import { prisma } from "@/lib/prisma";
 
+// Stock des kits rafraîchi au plus toutes les 60 s
+export const revalidate = 60;
+
 export default async function KitsPage() {
   const kits = await prisma.kit.findMany({
     where: { archived: false },
