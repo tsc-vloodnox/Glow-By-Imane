@@ -15,9 +15,9 @@ Application e-commerce de beauté et accessoires ciblant le marché guinéen, av
 | ORM | Prisma |
 | Auth admin | Cookie HMAC-SHA256 signé (sans Supabase Auth) |
 | Stockage images | Supabase Storage (bucket `catalogue`) |
-| Temps réel | Supabase Realtime (`postgres_changes` sur `Order`) |
 | Styles | Tailwind CSS + variables CSS custom + shadcn/ui |
-| Notifications | Web Push (VAPID) + service worker |
+| Notifications | Web Push (VAPID) — ⚠️ **à terminer** (voir plus bas) |
+| Tests | Vitest (`pnpm test`) |
 | Déploiement | Vercel (domaine : glowbyimane.com) |
 
 ---
@@ -38,7 +38,6 @@ ADMIN_SECRET=chaine_aleatoire_32_chars   # générer avec : openssl rand -hex 32
 
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 NEXT_PUBLIC_SUPABASE_STORAGE_URL=https://xxx.supabase.co/storage/v1/object/public/catalogue
 
@@ -48,7 +47,13 @@ WHATSAPP_VENDOR_NUMBER=224XXXXXXXXX
 # Web Push (générer avec : npx web-push generate-vapid-keys)
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
 VAPID_PRIVATE_KEY=...
+
+# Divers (optionnels)
+NEXT_PUBLIC_SITE_URL=https://glowbyimane.com   # base des liens de cartes cadeau
+NEXT_PUBLIC_META_PIXEL_ID=...                  # Meta Pixel désactivé si absent
 ```
+
+> 🔐 Changer `ADMIN_PASSWORD` (ou `ADMIN_SECRET`) déconnecte immédiatement toutes les sessions admin ouvertes.
 
 ---
 
@@ -56,9 +61,6 @@ VAPID_PRIVATE_KEY=...
 
 ```bash
 pnpm install
-
-# Composants shadcn/ui utilisés
-npx shadcn@latest add skeleton
 
 # Générer le client Prisma
 npx prisma generate
@@ -69,6 +71,16 @@ npx prisma migrate deploy
 # Lancer en développement
 pnpm dev
 ```
+
+Vérifications avant de pousser :
+
+```bash
+pnpm typecheck   # TypeScript
+pnpm lint        # ESLint
+pnpm test        # Tests unitaires (prix, validation, auth, stock…)
+```
+
+> Le projet utilise **pnpm** (`pnpm-lock.yaml`) — ne pas utiliser `npm install`, qui recréerait un `package-lock.json`.
 
 ---
 
@@ -91,8 +103,7 @@ app/
 │   │   └── gift-upload.ts        # Upload photo de carte cadeau (public, checkout)
 │   ├── produits/
 │   │   └── [slug]/
-│   │       ├── page.tsx          # Fiche produit (findUnique par id)
-│   │       └── loading.tsx       # Skeleton pendant le fetch
+│   │       └── page.tsx          # Fiche produit (par slug ; ancien lien par id → redirection)
 │   └── components/
 │       ├── ShopPageClient.tsx    # Hero + barre sticky + grille groupée par catégorie
 │       ├── ShopSearchFilterBar.tsx # Row unique : bouton filtre (dépliable) + recherche
@@ -100,8 +111,7 @@ app/
 │       ├── PriceDisplay.tsx      # Prix actuel + prix barré + badge % remise
 │       ├── ProductImage.tsx      # Image avec skeleton shadcn pendant le chargement
 │       ├── ProductGallery.tsx    # Galerie swipeable, scroll-snap-stop: always
-│       ├── ProductAddToCart.tsx  # Stepper quantité + bouton ajout (fiche produit)
-│       ├── AddToCartButton.tsx   # Ajout rapide (quantité 1, feedback 2s)
+│       ├── ProductAddToCart.tsx  # Choix de taille + stepper quantité + ajout (fiche produit)
 │       └── CartFloatingButton.tsx # Badge panier flottant, branché sur CartContext
 │
 └── admin/
@@ -123,25 +133,30 @@ cadeau/
 └── [token]/                      # Page publique de consultation d'une carte cadeau publiée
 
 lib/
+├── action-result.ts              # withActionResult / UserError / unwrapAction (erreurs des Server Actions)
 ├── admin-auth.ts                 # Auth HMAC : génération et vérification de token
+├── form-validation.ts            # toInt / toDate / toJsonArray (saisies admin)
+├── image-upload.ts               # Upload Supabase Storage (vérification du format réel)
+├── order-validation.ts           # Validation serveur des commandes boutique
+├── rate-limit.ts                 # Limiteur de débit en mémoire (anti-spam, login)
+├── slug.ts                       # slugify() + slug unique des produits
+├── stock.ts                      # releaseOrderStock() — remise en stock (annulation/suppression)
 ├── cart.ts                       # Logique panier localStorage (CartItem inclut stock)
 ├── gift-card.ts                  # buildDefaultGiftMessage(), giftCardUrl(), durée d'expiration du lien
 ├── images.ts                     # catalogPath() — résolution URL Supabase Storage
 ├── order-status.ts               # Config centralisée des statuts (labels, couleurs, transitions)
-├── pricing.ts                    # getDiscountPercent() — calcul remises produit/kit
+├── pricing.ts                    # Calcul des prix : remises, promotions, paliers (voir règle ci-dessous)
 ├── prisma.ts                     # Client Prisma singleton
 ├── push.ts                       # Envoi notifications Web Push (admin)
 ├── whatsapp.ts                   # normalizeGuineaPhone() + buildWhatsAppUrl() — liens wa.me,
 │                                  # buildOrderMessage() — génération message de commande pré-rempli
 └── supabase/
-    ├── client.ts                 # Client navigateur (anon key)
     └── server.ts                 # Client serveur (service role)
 
 proxy.ts                          # Protection routes /admin/* (vérification token HMAC)
                                   # ⚠️ Next.js 16 : renommé de middleware.ts → proxy.ts
 public/
-├── sw.js                         # Service worker Web Push
-├── og-image.jpg                  # Image Open Graph (1200×630)
+├── og-image.png                  # Image Open Graph (1200×630)
 ├── favicon-32x32.png
 ├── favicon-16x16.png
 ├── apple-touch-icon.png
@@ -155,7 +170,7 @@ app/
 ├── robots.ts                     # Robots.txt (bloque /admin/, /api/ et /cadeau/)
 └── manifest.ts                   # Web App Manifest (PWA)
 
-types.ts                          # Types TypeScript partagés
+types/types.ts                    # Types TypeScript partagés
 ```
 
 ---
@@ -164,7 +179,7 @@ types.ts                          # Types TypeScript partagés
 
 ### Entités principales
 
-**`Product`** — Produits du catalogue avec soft delete (`archived`) et support remises (`originalPrice`). Les produits ayant des commandes passées sont archivés plutôt que supprimés pour préserver l'historique.
+**`Product`** — Produits du catalogue avec soft delete (`archived`), support remises (`originalPrice`) et `slug` pour l'URL (`/produits/creme-eclat`). Le slug est généré à la création et **ne change pas** si le produit est renommé (les liens déjà partagés restent valides). Les produits ayant des commandes passées sont archivés plutôt que supprimés pour préserver l'historique.
 
 **`ProductSize`** — Déclinaisons de contenance/taille (30ml, 50ml...) avec prix et stock propres.
 
@@ -172,13 +187,13 @@ types.ts                          # Types TypeScript partagés
 
 **`Kit`** — Bundle de produits avec prix fixe et support remises (`originalPrice`).
 
-**`Order`** — Commandes avec workflow de statut, support de remises (`discountAmount`, `discountReason`, `finalTotal`) et traçabilité de la source (`app` / `whatsapp` / `admin`).
+**`Order`** — Commandes avec workflow de statut, support de remises (`discountAmount`, `discountReason`, `finalTotal`) et traçabilité de la source (`app` / `whatsapp` / `admin`). `stockReserved` indique que la commande a décrémenté le stock : il est restitué (une seule fois) à l'annulation ou à la suppression d'une commande non livrée.
 
 **`Delivery`** — Entité logistique séparée de la commande. Contient la date planifiée, le statut, le livreur assigné et les frais de livraison convenus (`deliveryFee`).
 
 **`GiftCard`** — Carte cadeau optionnelle associée à une commande (créée uniquement si le client coche "Cette commande est un cadeau" au checkout). Contient les infos destinataire, un message et une photo (tous deux modifiables/validables par l'admin), un statut `DRAFT`/`PUBLISHED` et un `token` unique généré à la publication pour le lien public temporaire (`/cadeau/[token]`, expire `GIFT_LINK_EXPIRY_DAYS` après publication — 30 jours par défaut).
 
-**`Customer`** — Profil client avec points de fidélité et statut VIP.
+**`Customer`** — Profil client avec points de fidélité et statut VIP. ⚠️ Pas encore alimenté par l'application.
 
 ### Workflow commande
 
@@ -199,7 +214,7 @@ PLANIFIEE → EN_COURS → LIVREE
 Statuts et déclencheurs propres à la livraison, mais **pas totalement indépendants** :
 quand une livraison passe à `LIVREE`, le statut de la commande associée est automatiquement
 mis à jour vers `LIVREE` (`updateDeliveryStatus` dans `app/admin/actions.ts`) — évite d'avoir
-à mettre à jour les deux statuts séparément.
+à mettre à jour les deux statuts séparément. Une commande annulée ne peut plus être passée à `LIVREE` par sa livraison.
 
 ---
 
@@ -217,12 +232,15 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 - Chaque `CartItem` inclut le champ `stock` capturé au moment de l'ajout — le stepper de quantité est borné côté UI sans appel serveur supplémentaire
 - La page `/commande` revalide les prix côté serveur au montage (`refreshCartPrices`) et affiche un bandeau si un prix a changé depuis l'ajout au panier
 - Le stock est décrémenté de façon **atomique** au moment de `createOrder` (`updateMany` conditionnel) — deux commandes simultanées sur le même produit ne peuvent pas survendre
+- `createOrder` ne fait **aucune confiance** au client : tout est revalidé (`lib/order-validation.ts` — quantités entières 1–50, 30 lignes max, téléphone guinéen, longueurs) et les prix sont recalculés côté serveur
+- Anti-spam : 5 commandes / 15 min par IP (best-effort, en mémoire) et 3 / 15 min par téléphone (en base)
 
 ### Remises produit (`lib/pricing.ts`)
 
-- `originalPrice` (nullable) sur `Product` et `Kit` — présence = remise active, absence = pas de remise
-- `getDiscountPercent(price, originalPrice)` calcule le % affiché automatiquement
-- `PriceDisplay` centralise l'affichage (prix actuel + prix barré + badge `-X%`) utilisé sur les cartes et les fiches produit
+- `originalPrice` (nullable) sur `Product` et `Kit` — présence = remise permanente, absence = pas de remise
+- Promotions temporaires (`Promotion`) : pourcentage appliqué sur une période
+- **Règle : les remises ne se cumulent pas.** On applique la plus avantageuse entre la remise permanente et la meilleure promotion, cette dernière étant calculée sur le prix de référence (`originalPrice` s'il existe, sinon `price`). Exemple : prix d'origine 10 000, prix 8 000, promo −30 % → 7 000 ; promo −10 % → 8 000
+- La même fonction (`resolveActiveUnitPrice`) sert à l'affichage (`PriceDisplay`), au panier et à la commande serveur : **prix affiché = prix facturé** (couvert par `lib/pricing.test.ts`)
 
 ---
 
@@ -231,8 +249,10 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 ### Auth (`/admin/login`)
 
 - Cookie `HttpOnly; Secure` posé par Server Action — le mot de passe ne transite jamais vers le navigateur
-- Token signé HMAC-SHA256 avec `ADMIN_SECRET`, expiration 8h
+- Token signé HMAC-SHA256 (clé dérivée de `ADMIN_SECRET` + `ADMIN_PASSWORD`), expiration 8h
+- Identifiants comparés en temps constant ; blocage 15 min après 5 échecs par IP
 - `proxy.ts` vérifie la signature à chaque requête `/admin/*` (Next.js 16 — anciennement `middleware.ts`)
+- ⚠️ Le proxy ne protège pas les Server Actions (appelables depuis n'importe quelle page) : **chaque action admin doit appeler `requireAdmin()`**
 
 ### Catégories (`/admin/categories`)
 
@@ -258,8 +278,9 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 - **Carte cadeau** (si le client a coché "Cette commande est un cadeau" au checkout) : édition du
   destinataire/message/photo, publication d'un lien public temporaire (30 jours), envoi du lien
   au destinataire via WhatsApp — voir `GiftCardPanel.tsx`
-- **Suppression en masse** avec double confirmation
-- Temps réel via Supabase Realtime : nouvelle commande → toast admin + Web Push
+- **Annulation** : les articles réservés sont remis en stock
+- **Suppression en masse** avec double confirmation (stock restitué pour les commandes non livrées)
+- Commandes saisies par l'admin : stock décrémenté comme pour une commande boutique
 
 ### Livraisons (`/admin/livraisons`)
 
@@ -274,7 +295,8 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 ## SEO & PWA
 
 - Métadonnées globales + `generateMetadata` dynamique par fiche produit
-- Sitemap dynamique (`/sitemap.xml`) incluant toutes les fiches produit non archivées
+- Sitemap dynamique (`/sitemap.xml`) incluant les fiches produit et les kits non archivés
+- URLs produit lisibles (`/produits/<slug>`) avec balise canonique ; les anciens liens `/produits/<id>` redirigent vers le slug
 - `robots.txt` bloquant `/admin/`, `/api/` et `/cadeau/` (liens de cartes cadeau partagés, pas indexables — `noindex` également posé par page via `generateMetadata`)
 - Web App Manifest (`manifest.webmanifest`) — installable sur mobile/desktop
 - Site indexé sur Google Search Console (domaine vérifié via enregistrement TXT OVH)
@@ -304,8 +326,9 @@ L'application n'utilise pas l'API WhatsApp — elle génère des **liens `wa.me`
 npx prisma migrate dev --name nom_de_la_migration
 
 # ⚠️ Pour les colonnes NOT NULL sur tables existantes :
-# utiliser --create-only, ajouter DEFAULT now() dans le SQL généré,
+# utiliser --create-only, ajouter DEFAULT (ou remplir la colonne) dans le SQL généré,
 # puis npx prisma migrate dev pour appliquer
+# (exemple : 20260928130000_product_slug_and_indexes remplit les slugs avant le NOT NULL)
 
 # Appliquer en production
 npx prisma migrate deploy
@@ -320,25 +343,35 @@ npx prisma studio
 
 - **Server Actions** pour toutes les mutations (`"use server"`)
 - `requireAdmin()` appelé en première ligne de chaque action et page admin
+- **Erreurs des Server Actions** : en production, Next.js masque le message des erreurs levées. Les actions sont donc exportées via `withActionResult(...)` et renvoient `{ ok, data | error }`. Lever `UserError("…")` pour un message destiné à l'utilisateur (les autres erreurs donnent un message générique et sont journalisées). Côté client : `const x = unwrapAction(xAction)` — voir `lib/action-result.ts`
+- Valider toute donnée reçue par une action (`lib/form-validation.ts`, `lib/order-validation.ts`) : les types TypeScript ne protègent rien à l'exécution
+- Écritures multiples liées (produit + tailles + paliers, commande + stock…) dans une `prisma.$transaction`
 - Types Prisma composés centralisés dans `types.ts`
 - Statuts et transitions dans `lib/order-status.ts` — ne pas dupliquer ailleurs
 - Images référencées par nom de fichier uniquement en base, URL construite via `catalogPath()` dans `lib/images.ts`
 - Le `CartContext` est la seule source de vérité pour l'état du panier côté client — ne pas appeler `lib/cart.ts` directement depuis les composants, passer par `useCart()`
-- Remises : passer par `getDiscountPercent()` de `lib/pricing.ts`, afficher via `<PriceDisplay />`
+- Prix : passer par `lib/pricing.ts` (`resolveDiscountedLineTotal`, `getEffectiveDiscount`), afficher via `<PriceDisplay />`
 
 ---
 
-## Prochaine étape — Meta Pixel
+## Meta Pixel
 
-Intégration prévue via `next/script` dans `app/layout.tsx` (strategy `afterInteractive`).
-
-Événements à tracker :
+Intégré via `next/script` dans `app/MetaPixel.tsx` (actif seulement si `NEXT_PUBLIC_META_PIXEL_ID` est défini).
 
 | Événement | Déclencheur |
 |---|---|
 | `PageView` | Automatique sur toutes les pages |
-| `ViewContent` | Montage de la fiche produit |
+| `ViewContent` | Montage de la fiche produit (`ProductViewTracker`) |
 | `AddToCart` | `addItem()` dans `CartContext` |
 | `Lead` | Redirection WhatsApp après `createOrder` |
 
 > `Lead` est l'équivalent de `Purchase` pour ce projet — le paiement se faisant à la livraison hors app, la redirection WhatsApp est le signal de conversion le plus fiable.
+
+---
+
+## Chantiers ouverts
+
+- **Notifications Web Push** : la route d'abonnement (`/api/webhooks/push`, réservée à l'admin) et l'envoi (`lib/push.ts`) existent, mais il manque le service worker (`public/sw.js`), le bouton d'activation côté admin et l'appel à `sendOrderNotification` après `createOrder`.
+- **Limitation de débit** : en mémoire, donc par instance Vercel. Pour une protection solide, brancher un store partagé (Upstash Redis / Vercel KV) ou une règle WAF Vercel.
+- **`Customer`** : modèle présent mais non alimenté (fidélité, VIP).
+- **Kits** : la composition n'est pas figée dans la commande ; une annulation restitue selon la composition actuelle du kit.
