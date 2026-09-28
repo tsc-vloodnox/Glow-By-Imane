@@ -5,29 +5,30 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
+import { UserError, withActionResult } from "@/lib/action-result";
 
-export async function createCategory(name: string) {
+async function createCategoryImpl(name: string) {
   await requireAdmin();
 
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Le nom ne peut pas être vide.");
+  if (!trimmed) throw new UserError("Le nom ne peut pas être vide.");
 
   await prisma.category.create({ data: { name: trimmed } });
   revalidatePath("/admin/categories");
 }
 
-export async function renameCategory(id: string, name: string) {
+async function renameCategoryImpl(id: string, name: string) {
   await requireAdmin();
 
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Le nom ne peut pas être vide.");
+  if (!trimmed) throw new UserError("Le nom ne peut pas être vide.");
 
   await prisma.category.update({ where: { id }, data: { name: trimmed } });
   revalidatePath("/admin/categories");
   revalidatePath("/");
 }
 
-export async function deleteCategory(id: string) {
+async function deleteCategoryImpl(id: string) {
   await requireAdmin();
 
   // Bloque la suppression si des produits sont encore rattachés
@@ -36,7 +37,7 @@ export async function deleteCategory(id: string) {
   });
 
   if (count > 0) {
-    throw new Error(
+    throw new UserError(
       `Impossible de supprimer : ${count} produit${count > 1 ? "s" : ""} actif${count > 1 ? "s" : ""} dans cette catégorie. Archivez-les d'abord.`,
     );
   }
@@ -45,3 +46,12 @@ export async function deleteCategory(id: string) {
   revalidatePath("/admin/categories");
   revalidatePath("/");
 }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// Enveloppées par withActionResult : renvoient { ok, data | error } au lieu de lever
+// une erreur, dont le message serait masqué par Next.js en production.
+// Côté client : const x = unwrapAction(xAction) — cf. lib/action-result.ts
+
+export const createCategory = withActionResult(createCategoryImpl);
+export const renameCategory = withActionResult(renameCategoryImpl);
+export const deleteCategory = withActionResult(deleteCategoryImpl);

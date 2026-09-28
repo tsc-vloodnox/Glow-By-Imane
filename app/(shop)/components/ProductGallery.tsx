@@ -5,6 +5,9 @@ import { useRef, useState } from "react";
 
 import { ProductImage } from "./ProductImage";
 
+// Au-delà, les points ne tiennent plus sur un écran de téléphone : compteur à la place
+const MAX_DOTS = 8;
+
 type ProductGalleryProps = {
   images: string[];
   productName: string;
@@ -39,7 +42,7 @@ export function ProductGallery({ images, productName }: ProductGalleryProps) {
         ))}
       </div>
 
-      {images.length > 1 ? (
+      {images.length > 1 && images.length <= MAX_DOTS ? (
         <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 gap-2">
           {images.map((_, index) => (
             <span
@@ -50,6 +53,13 @@ export function ProductGallery({ images, productName }: ProductGalleryProps) {
             />
           ))}
         </div>
+      ) : null}
+
+      {/* Beaucoup de photos : un compteur plutôt qu'une rangée de points qui déborde */}
+      {images.length > MAX_DOTS ? (
+        <span className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-black/45 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+          {activeIndex + 1} / {images.length}
+        </span>
       ) : null}
     </section>
   );

@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteAllOrders } from "./actions";
+import { deleteAllOrders as deleteAllOrdersAction } from "./actions";
 import type { OrderStatusValue } from "./actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const deleteAllOrders = unwrapAction(deleteAllOrdersAction);
 
 const STATUS_OPTIONS: Array<{ value: OrderStatusValue | "TOUTES"; label: string }> = [
   { value: "TOUTES", label: "Toutes les commandes" },

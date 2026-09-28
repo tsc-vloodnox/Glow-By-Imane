@@ -4,8 +4,15 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
+import { UserError, withActionResult } from "@/lib/action-result";
+import { toDate, toInt, toJsonArray } from "@/lib/form-validation";
+import { uniqueProductSlug } from "@/lib/slug";
+
+const isBlank = (value: unknown) => value === undefined || value === null || value === "";
 
 // ─── Helpers revalidation ────────────────────────────────────────────────────
 
@@ -48,35 +55,38 @@ type PackPriceInput = {
   productSizeId?: string | null; // référence un SizeInput.id (réel ou temporaire)
 };
 
-function parseJsonField<T>(raw: FormDataEntryValue | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(String(raw)) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function parseProductFormData(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const price = Number(formData.get("price") ?? 0);
-  const stock = Number(formData.get("stock") ?? 0);
+  const price = toInt(formData.get("price"), "Prix");
+  const stock = toInt(formData.get("stock"), "Stock", { optional: true });
   const categoryId = String(formData.get("categoryId") ?? "").trim();
   const favorite = formData.get("favorite") === "on";
   const imagesField = String(formData.get("images") ?? "").trim();
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
-  if (!name || !categoryId || Number.isNaN(price) || Number.isNaN(stock)) {
-    throw new Error("Informations invalides.");
-  }
+  if (!name) throw new UserError("Le nom du produit est requis.");
+  if (!categoryId) throw new UserError("La catégorie est requise.");
 
-  const sizes = parseJsonField<SizeInput[]>(formData.get("sizes"), []).filter(
-    (s) => s.label && s.label.trim().length > 0,
-  );
-  const packPrices = parseJsonField<PackPriceInput[]>(formData.get("packPrices"), []).filter(
-    (p) => p.quantity > 0 && p.price > 0,
-  );
+  const sizes: SizeInput[] = (toJsonArray(formData.get("sizes"), "Tailles") as Partial<SizeInput>[])
+    .filter((s) => typeof s.label === "string" && s.label.trim().length > 0)
+    .map((s) => ({
+      id: typeof s.id === "string" ? s.id : undefined,
+      label: (s.label as string).trim().slice(0, 50),
+      price: toInt(s.price, `Prix de la taille « ${s.label} »`),
+      stock: toInt(s.stock, `Stock de la taille « ${s.label} »`, { optional: true }),
+      archived: s.archived === true,
+    }));
+
+  // Lignes vides (quantité et prix non renseignés) ignorées, lignes incomplètes refusées
+  const packPrices: PackPriceInput[] = (toJsonArray(formData.get("packPrices"), "Paliers") as Partial<PackPriceInput>[])
+    .filter((p) => !(isBlank(p.quantity) && isBlank(p.price)))
+    .map((p) => ({
+      id: typeof p.id === "string" ? p.id : undefined,
+      quantity: toInt(p.quantity, "Quantité du palier", { min: 1 }),
+      price: toInt(p.price, "Prix du palier", { min: 1 }),
+      productSizeId: typeof p.productSizeId === "string" ? p.productSizeId : null,
+    }));
 
   return { name, description, price, stock, categoryId, favorite, images, sizes, packPrices };
 }
@@ -88,8 +98,8 @@ function parseProductFormData(formData: FormData) {
  * - Retourne une correspondance id-temporaire → id-réel, utile pour résoudre les paliers
  *   de prix qui référencent une taille tout juste créée.
  */
-async function syncProductSizes(productId: string, sizes: SizeInput[]) {
-  const existing = await prisma.productSize.findMany({
+async function syncProductSizes(tx: Prisma.TransactionClient, productId: string, sizes: SizeInput[]) {
+  const existing = await tx.productSize.findMany({
     where: { productId },
     select: { id: true },
   });
@@ -98,11 +108,11 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   for (const id of toRemove) {
-    const hasOrders = await prisma.orderItem.count({ where: { productSizeId: id } });
+    const hasOrders = await tx.orderItem.count({ where: { productSizeId: id } });
     if (hasOrders > 0) {
-      await prisma.productSize.update({ where: { id }, data: { archived: true } });
+      await tx.productSize.update({ where: { id }, data: { archived: true } });
     } else {
-      await prisma.productSize.delete({ where: { id } });
+      await tx.productSize.delete({ where: { id } });
     }
   }
 
@@ -111,12 +121,12 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
   for (const [i, s] of sizes.entries()) {
     const label = s.label.trim();
     if (s.id && existingIds.has(s.id)) {
-      await prisma.productSize.update({
+      await tx.productSize.update({
         where: { id: s.id },
         data: { label, price: s.price, stock: s.stock, position: i, archived: s.archived ?? false },
       });
     } else {
-      const created = await prisma.productSize.create({
+      const created = await tx.productSize.create({
         data: {
           productId,
           label,
@@ -140,11 +150,12 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
  * directe possible.
  */
 async function syncPackPrices(
+  tx: Prisma.TransactionClient,
   productId: string,
   packPrices: PackPriceInput[],
   sizeTempIdMap: Map<string, string>,
 ) {
-  const existing = await prisma.productPackPrice.findMany({
+  const existing = await tx.productPackPrice.findMany({
     where: { productId },
     select: { id: true },
   });
@@ -153,7 +164,7 @@ async function syncPackPrices(
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   if (toRemove.length > 0) {
-    await prisma.productPackPrice.deleteMany({ where: { id: { in: toRemove } } });
+    await tx.productPackPrice.deleteMany({ where: { id: { in: toRemove } } });
   }
 
   for (const [i, p] of packPrices.entries()) {
@@ -162,12 +173,12 @@ async function syncPackPrices(
       : null;
 
     if (p.id && existingIds.has(p.id)) {
-      await prisma.productPackPrice.update({
+      await tx.productPackPrice.update({
         where: { id: p.id },
         data: { quantity: p.quantity, price: p.price, productSizeId: resolvedSizeId, position: i },
       });
     } else {
-      await prisma.productPackPrice.create({
+      await tx.productPackPrice.create({
         data: {
           productId,
           quantity: p.quantity,
@@ -180,18 +191,26 @@ async function syncPackPrices(
   }
 }
 
+// Synchronisations en plusieurs requêtes : délai plus large que les 5 s par défaut
+const SYNC_TRANSACTION_OPTIONS = { timeout: 20_000 };
+
 const productWithPricingInclude = {
   sizes: { orderBy: { position: "asc" as const } },
   packPrices: { orderBy: { position: "asc" as const } },
 };
 
-export async function createProduct(formData: FormData) {
+async function createProductImpl(formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
-  const product = await prisma.product.create({ data });
-  const sizeTempIdMap = await syncProductSizes(product.id, sizes);
-  await syncPackPrices(product.id, packPrices, sizeTempIdMap);
+  // Tout ou rien : un échec en cours de route ne laisse pas un produit à moitié enregistré
+  const product = await prisma.$transaction(async (tx) => {
+    const slug = await uniqueProductSlug(tx, data.name);
+    const created = await tx.product.create({ data: { ...data, slug } });
+    const sizeTempIdMap = await syncProductSizes(tx, created.id, sizes);
+    await syncPackPrices(tx, created.id, packPrices, sizeTempIdMap);
+    return created;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/produits");
   revalidateCatalogue();
@@ -202,18 +221,22 @@ export async function createProduct(formData: FormData) {
   });
 }
 
-export async function updateProduct(productId: string, formData: FormData) {
+async function updateProductImpl(productId: string, formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
-  await prisma.product.update({ where: { id: productId }, data });
-  const sizeTempIdMap = await syncProductSizes(productId, sizes);
-  await syncPackPrices(productId, packPrices, sizeTempIdMap);
+  // Tout ou rien : un échec en cours de route ne laisse pas un produit à moitié modifié
+  const { slug } = await prisma.$transaction(async (tx) => {
+    const updated = await tx.product.update({ where: { id: productId }, data });
+    const sizeTempIdMap = await syncProductSizes(tx, productId, sizes);
+    await syncPackPrices(tx, productId, packPrices, sizeTempIdMap);
+    return updated;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/produits");
   revalidateCatalogue();
   // Invalide aussi la page produit individuelle
-  revalidatePath(`/produits/${productId}`);
+  revalidatePath(`/produits/${slug}`);
 
   return prisma.product.findUniqueOrThrow({
     where: { id: productId },
@@ -225,7 +248,7 @@ export async function updateProduct(productId: string, formData: FormData) {
  * Soft delete — archive le produit au lieu de le supprimer.
  * Préserve l'historique des commandes passées (OrderItem → Product).
  */
-export async function archiveProduct(productId: string) {
+async function archiveProductImpl(productId: string) {
   await requireAdmin();
   await prisma.product.update({
     where: { id: productId },
@@ -238,7 +261,7 @@ export async function archiveProduct(productId: string) {
 /**
  * Restaure un produit archivé.
  */
-export async function restoreProduct(productId: string) {
+async function restoreProductImpl(productId: string) {
   await requireAdmin();
   await prisma.product.update({
     where: { id: productId },
@@ -251,17 +274,27 @@ export async function restoreProduct(productId: string) {
 /**
  * Suppression définitive — uniquement pour les produits sans commandes.
  */
-export async function deleteProduct(productId: string) {
+async function deleteProductImpl(productId: string) {
   await requireAdmin();
 
   const hasOrders = await prisma.orderItem.count({ where: { productId } });
   if (hasOrders > 0) {
-    throw new Error(
+    throw new UserError(
       "Ce produit a des commandes associées. Archivez-le plutôt que de le supprimer.",
     );
   }
 
-  await prisma.product.delete({ where: { id: productId } });
+  const usedInKits = await prisma.kitItem.count({ where: { productId } });
+  if (usedInKits > 0) {
+    throw new UserError("Ce produit fait partie d'un kit. Retirez-le du kit ou archivez-le.");
+  }
+
+  // Tailles et paliers n'ont pas de suppression en cascade : on les retire avec le produit
+  await prisma.$transaction([
+    prisma.productPackPrice.deleteMany({ where: { productId } }),
+    prisma.productSize.deleteMany({ where: { productId } }),
+    prisma.product.delete({ where: { id: productId } }),
+  ]);
   revalidatePath("/admin/produits");
   revalidateCatalogue();
 }
@@ -278,17 +311,20 @@ type KitItemInput = {
 function parseKitFormData(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
-  const price = Number(formData.get("price") ?? 0);
+  const price = toInt(formData.get("price"), "Prix du kit");
   const imagesField = String(formData.get("images") ?? "").trim();
   const images = imagesField.split("\n").map((s) => s.trim()).filter(Boolean);
 
-  if (!name || Number.isNaN(price)) {
-    throw new Error("Informations invalides.");
-  }
+  if (!name) throw new UserError("Le nom du kit est requis.");
 
-  const items = parseJsonField<KitItemInput[]>(formData.get("items"), []).filter(
-    (i) => i.productId && i.quantity > 0,
-  );
+  const items: KitItemInput[] = (toJsonArray(formData.get("items"), "Articles du kit") as Partial<KitItemInput>[])
+    .filter((i) => typeof i.productId === "string" && i.productId)
+    .map((i) => ({
+      id: typeof i.id === "string" ? i.id : undefined,
+      productId: i.productId as string,
+      productSizeId: typeof i.productSizeId === "string" ? i.productSizeId : null,
+      quantity: toInt(i.quantity, "Quantité d'un article du kit", { min: 1, max: 1000 }),
+    }));
 
   return { name, description, price, images, items };
 }
@@ -298,14 +334,14 @@ function parseKitFormData(formData: FormData) {
  * Pas de contrainte d'historique : le contenu figé d'un kit déjà commandé vit dans
  * OrderItem (quantité + prix au moment de la commande), donc suppression directe possible.
  */
-async function syncKitItems(kitId: string, items: KitItemInput[]) {
-  const existing = await prisma.kitItem.findMany({ where: { kitId }, select: { id: true } });
+async function syncKitItems(tx: Prisma.TransactionClient, kitId: string, items: KitItemInput[]) {
+  const existing = await tx.kitItem.findMany({ where: { kitId }, select: { id: true } });
   const existingIds = new Set(existing.map((i) => i.id));
   const incomingIds = new Set(items.filter((i) => i.id).map((i) => i.id as string));
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   if (toRemove.length > 0) {
-    await prisma.kitItem.deleteMany({ where: { id: { in: toRemove } } });
+    await tx.kitItem.deleteMany({ where: { id: { in: toRemove } } });
   }
 
   for (const item of items) {
@@ -316,9 +352,9 @@ async function syncKitItems(kitId: string, items: KitItemInput[]) {
       quantity: item.quantity,
     };
     if (item.id && existingIds.has(item.id)) {
-      await prisma.kitItem.update({ where: { id: item.id }, data });
+      await tx.kitItem.update({ where: { id: item.id }, data });
     } else {
-      await prisma.kitItem.create({ data });
+      await tx.kitItem.create({ data });
     }
   }
 }
@@ -332,12 +368,15 @@ const kitWithItemsInclude = {
   },
 };
 
-export async function createKit(formData: FormData) {
+async function createKitImpl(formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
-  const kit = await prisma.kit.create({ data });
-  await syncKitItems(kit.id, items);
+  const kit = await prisma.$transaction(async (tx) => {
+    const created = await tx.kit.create({ data });
+    await syncKitItems(tx, created.id, items);
+    return created;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/kits");
   revalidateCatalogue();
@@ -348,12 +387,14 @@ export async function createKit(formData: FormData) {
   });
 }
 
-export async function updateKit(kitId: string, formData: FormData) {
+async function updateKitImpl(kitId: string, formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
-  await prisma.kit.update({ where: { id: kitId }, data });
-  await syncKitItems(kitId, items);
+  await prisma.$transaction(async (tx) => {
+    await tx.kit.update({ where: { id: kitId }, data });
+    await syncKitItems(tx, kitId, items);
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/kits");
   revalidateCatalogue();
@@ -367,7 +408,7 @@ export async function updateKit(kitId: string, formData: FormData) {
 /**
  * Soft delete — archive le kit au lieu de le supprimer.
  */
-export async function archiveKit(kitId: string) {
+async function archiveKitImpl(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: true } });
   revalidatePath("/admin/kits");
@@ -377,7 +418,7 @@ export async function archiveKit(kitId: string) {
 /**
  * Restaure un kit archivé.
  */
-export async function restoreKit(kitId: string) {
+async function restoreKitImpl(kitId: string) {
   await requireAdmin();
   await prisma.kit.update({ where: { id: kitId }, data: { archived: false } });
   revalidatePath("/admin/kits");
@@ -387,39 +428,41 @@ export async function restoreKit(kitId: string) {
 /**
  * Suppression définitive — uniquement pour les kits sans commandes.
  */
-export async function deleteKit(kitId: string) {
+async function deleteKitImpl(kitId: string) {
   await requireAdmin();
 
   const hasOrders = await prisma.orderItem.count({ where: { kitId } });
   if (hasOrders > 0) {
-    throw new Error("Ce kit a des commandes associées. Archivez-le plutôt que de le supprimer.");
+    throw new UserError("Ce kit a des commandes associées. Archivez-le plutôt que de le supprimer.");
   }
 
-  await prisma.kitItem.deleteMany({ where: { kitId } });
-  await prisma.kit.delete({ where: { id: kitId } });
+  await prisma.$transaction([
+    prisma.kitItem.deleteMany({ where: { kitId } }),
+    prisma.kit.delete({ where: { id: kitId } }),
+  ]);
   revalidatePath("/admin/kits");
   revalidateCatalogue();
 }
 
 // ─── Livraisons ───────────────────────────────────────────────────────────────
 
-export async function createDelivery(formData: FormData) {
+async function createDeliveryImpl(formData: FormData) {
   await requireAdmin();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
   const livreurId = String(formData.get("livreurId") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
-  const deliveryFee = Math.max(0, Number(formData.get("deliveryFee") ?? 0));
+  const deliveryFee = toInt(formData.get("deliveryFee"), "Frais de livraison", { optional: true });
 
   if (!orderId || !scheduledAt) {
-    throw new Error("Commande et date de livraison requises.");
+    throw new UserError("Commande et date de livraison requises.");
   }
 
   await prisma.delivery.create({
     data: {
       orderId,
-      scheduledAt: new Date(scheduledAt),
+      scheduledAt: toDate(scheduledAt, "Date de livraison"),
       livreurId,
       notes,
       deliveryFee,
@@ -431,35 +474,47 @@ export async function createDelivery(formData: FormData) {
   revalidatePath(`/admin/commandes/${orderId}`);
 }
 
-export async function updateDeliveryStatus(
+async function updateDeliveryStatusImpl(
   deliveryId: string,
   status: "PLANIFIEE" | "EN_COURS" | "LIVREE" | "ECHOUEE" | "REPORTEE",
 ) {
   await requireAdmin();
 
-  const delivery = await prisma.delivery.update({
+  const current = await prisma.delivery.findUniqueOrThrow({
     where: { id: deliveryId },
-    data: {
-      status,
-      deliveredAt: status === "LIVREE" ? new Date() : undefined,
-    },
+    select: { order: { select: { status: true } } },
   });
-
-  // La commande suit automatiquement le statut "Livrée" de sa livraison —
-  // évite d'avoir à mettre à jour les deux statuts séparément.
-  if (status === "LIVREE") {
-    await prisma.order.update({
-      where: { id: delivery.orderId },
-      data: { status: "LIVREE" },
-    });
+  if (current.order.status === "ANNULEE") {
+    throw new UserError("Cette commande est annulée : sa livraison ne peut plus changer de statut.");
   }
+
+  const delivery = await prisma.$transaction(async (tx) => {
+    const updated = await tx.delivery.update({
+      where: { id: deliveryId },
+      data: {
+        status,
+        deliveredAt: status === "LIVREE" ? new Date() : undefined,
+      },
+    });
+
+    // La commande suit automatiquement le statut "Livrée" de sa livraison —
+    // évite d'avoir à mettre à jour les deux statuts séparément.
+    if (status === "LIVREE") {
+      await tx.order.update({
+        where: { id: updated.orderId },
+        data: { status: "LIVREE" },
+      });
+    }
+
+    return updated;
+  });
 
   revalidatePath("/admin/livraisons");
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${delivery.orderId}`);
 }
 
-export async function updateDelivery(deliveryId: string, formData: FormData) {
+async function updateDeliveryImpl(deliveryId: string, formData: FormData) {
   await requireAdmin();
 
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
@@ -469,7 +524,7 @@ export async function updateDelivery(deliveryId: string, formData: FormData) {
   await prisma.delivery.update({
     where: { id: deliveryId },
     data: {
-      scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
+      scheduledAt: scheduledAt ? toDate(scheduledAt, "Date de livraison") : undefined,
       livreurId,
       notes,
     },
@@ -484,7 +539,7 @@ export async function updateDelivery(deliveryId: string, formData: FormData) {
  * Assigne (ou retire, si livreurId est null) un livreur à un lot de livraisons.
  * C'est le cœur du flux "sélectionner des commandes et les attribuer à un livreur".
  */
-export async function assignLivreur(deliveryIds: string[], livreurId: string | null) {
+async function assignLivreurImpl(deliveryIds: string[], livreurId: string | null) {
   await requireAdmin();
 
   if (deliveryIds.length === 0) return;
@@ -500,7 +555,7 @@ export async function assignLivreur(deliveryIds: string[], livreurId: string | n
 /**
  * Crée un nouveau livreur à la volée (depuis la barre d'assignation par exemple).
  */
-export async function createLivreur(formData: FormData) {
+async function createLivreurImpl(formData: FormData) {
   await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -508,7 +563,7 @@ export async function createLivreur(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
   if (!name || !phone) {
-    throw new Error("Nom et téléphone du livreur requis.");
+    throw new UserError("Nom et téléphone du livreur requis.");
   }
 
   const livreur = await prisma.livreur.create({ data: { name, phone, notes } });
@@ -521,7 +576,7 @@ export async function createLivreur(formData: FormData) {
 /**
  * Met à jour les informations d'un livreur (nom, téléphone, notes).
  */
-export async function updateLivreur(livreurId: string, formData: FormData) {
+async function updateLivreurImpl(livreurId: string, formData: FormData) {
   await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -529,7 +584,7 @@ export async function updateLivreur(livreurId: string, formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
   if (!name || !phone) {
-    throw new Error("Nom et téléphone du livreur requis.");
+    throw new UserError("Nom et téléphone du livreur requis.");
   }
 
   await prisma.livreur.update({ where: { id: livreurId }, data: { name, phone, notes } });
@@ -542,7 +597,7 @@ export async function updateLivreur(livreurId: string, formData: FormData) {
  * Active/désactive un livreur (désactivé = n'apparaît plus dans le sélecteur
  * d'assignation, mais reste visible sur les livraisons déjà attribuées).
  */
-export async function toggleLivreurActive(livreurId: string, active: boolean) {
+async function toggleLivreurActiveImpl(livreurId: string, active: boolean) {
   await requireAdmin();
   await prisma.livreur.update({ where: { id: livreurId }, data: { active } });
   revalidatePath("/admin/livraisons");
@@ -553,19 +608,41 @@ export async function toggleLivreurActive(livreurId: string, active: boolean) {
  * Met à jour les frais de livraison convenus pour une livraison (champ isolé,
  * modifiable en ligne depuis la vue livraisons sans repasser par updateDelivery).
  */
-export async function updateDeliveryFee(deliveryId: string, deliveryFee: number) {
+async function updateDeliveryFeeImpl(deliveryId: string, deliveryFee: number) {
   await requireAdmin();
 
-  if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
-    throw new Error("Frais de livraison invalides.");
-  }
+  const fee = toInt(deliveryFee, "Frais de livraison");
 
   const delivery = await prisma.delivery.update({
     where: { id: deliveryId },
-    data: { deliveryFee },
+    data: { deliveryFee: fee },
   });
 
   revalidatePath("/admin/livraisons");
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${delivery.orderId}`);
 }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// Enveloppées par withActionResult : renvoient { ok, data | error } au lieu de lever
+// une erreur, dont le message serait masqué par Next.js en production.
+// Côté client : const x = unwrapAction(xAction) — cf. lib/action-result.ts
+
+export const createProduct = withActionResult(createProductImpl);
+export const updateProduct = withActionResult(updateProductImpl);
+export const archiveProduct = withActionResult(archiveProductImpl);
+export const restoreProduct = withActionResult(restoreProductImpl);
+export const deleteProduct = withActionResult(deleteProductImpl);
+export const createKit = withActionResult(createKitImpl);
+export const updateKit = withActionResult(updateKitImpl);
+export const archiveKit = withActionResult(archiveKitImpl);
+export const restoreKit = withActionResult(restoreKitImpl);
+export const deleteKit = withActionResult(deleteKitImpl);
+export const createDelivery = withActionResult(createDeliveryImpl);
+export const updateDeliveryStatus = withActionResult(updateDeliveryStatusImpl);
+export const updateDelivery = withActionResult(updateDeliveryImpl);
+export const assignLivreur = withActionResult(assignLivreurImpl);
+export const createLivreur = withActionResult(createLivreurImpl);
+export const updateLivreur = withActionResult(updateLivreurImpl);
+export const toggleLivreurActive = withActionResult(toggleLivreurActiveImpl);
+export const updateDeliveryFee = withActionResult(updateDeliveryFeeImpl);

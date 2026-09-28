@@ -40,6 +40,10 @@ model Category {
 model Product {
   id            String      @id @default(cuid())
   name          String
+  /// Identifiant lisible dans l'URL (/produits/<slug>), généré à la création, stable ensuite.
+  /// Le défaut côté base ne sert qu'à l'ancienne version du code (migration rétrocompatible) :
+  /// createProduct fournit toujours un vrai slug (lib/slug.ts).
+  slug          String      @unique @default(dbgenerated("('produit-'::text || substr(md5(((random())::text || (clock_timestamp())::text)), 1, 10))"))
   description   String
   price         Int
   originalPrice Int?
@@ -57,6 +61,9 @@ model Product {
   packPrices ProductPackPrice[]
   promotions  ProductPromotion[]
   kitItems   KitItem[]
+
+  @@index([categoryId])
+  @@index([archived, createdAt])
 }
 
 /// Déclinaisons de contenance / taille (30ml, 50ml, 100ml...).
@@ -114,6 +121,7 @@ model ProductPromotion {
   product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([promotionId, productId])
+  @@index([productId])
 }
 /// Kit / bundle de produits (ex: "kit soin visage complet").
 model Kit {
@@ -140,6 +148,7 @@ model KitItem {
   quantity      Int          @default(1)
 
   @@unique([kitId, productId, productSizeId])
+  @@index([productId])
 }
 
 model Customer {
@@ -174,11 +183,21 @@ model Order {
 
   finalTotal Int @default(0)
 
+  /// true tant que le stock des articles est réservé (décrémenté) par cette commande.
+  /// Passe à false quand le stock est restitué (annulation / suppression) → jamais restitué deux fois.
+  /// Commandes boutique et commandes admin créées après la migration 20260928120000 : true à la création.
+  stockReserved Boolean @default(false)
+
   items    OrderItem[]
   delivery Delivery?
   giftCard GiftCard?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([phone, createdAt]) // anti-spam : commandes récentes par téléphone
 }
 
 model OrderItem {
@@ -197,6 +216,11 @@ model OrderItem {
 
   quantity  Int
   unitPrice Int
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([productSizeId])
+  @@index([kitId])
 }
 
 model PushSubscription {
@@ -234,6 +258,9 @@ model Delivery {
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([livreurId])
+  @@index([scheduledAt])
 }
 
 /// Carte cadeau associée à une commande passée pour offrir à un tiers.

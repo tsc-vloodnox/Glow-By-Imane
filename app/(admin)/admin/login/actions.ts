@@ -17,6 +17,10 @@ import {
   buildSignedToken,
   isAdminCredentialsValid,
 } from "@/lib/admin-auth";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 
 type LoginActionState = { error: string } | null;
 
@@ -33,7 +37,14 @@ export async function loginAction(
     return { error: "Veuillez saisir votre numéro et votre mot de passe." };
   }
 
-  if (!isAdminCredentialsValid(phone, password)) {
+  // Anti brute-force : au-delà de N échecs par IP, connexion bloquée un moment
+  const rateLimitKey = `admin-login:${await getClientIp()}`;
+  if (isRateLimited(rateLimitKey, MAX_FAILED_ATTEMPTS, LOCKOUT_WINDOW_MS)) {
+    return { error: "Trop de tentatives échouées. Réessayez dans 15 minutes." };
+  }
+
+  if (!(await isAdminCredentialsValid(phone, password))) {
+    recordRateLimitHit(rateLimitKey, LOCKOUT_WINDOW_MS);
     // Délai volontaire pour ralentir le brute-force
     await new Promise((r) => setTimeout(r, 500));
     return { error: "Identifiants incorrects." };
@@ -53,7 +64,8 @@ export async function loginAction(
   });
 
   // Redirige vers la destination demandée (ou dashboard par défaut)
-  const safeNext = next.startsWith("/admin") ? next : "/admin/dashboard";
+  // Uniquement un chemin interne de l'admin (pas "//", "\\" ni URL absolue → pas d'open redirect)
+  const safeNext = /^\/admin(\/[\w\-/]*)?$/.test(next) ? next : "/admin/dashboard";
   redirect(safeNext);
 }
 

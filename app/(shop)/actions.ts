@@ -6,8 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
+import { MAX_ORDER_LINES, parseOrderInput } from "@/lib/order-validation";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { CartItemInput, OrderInput } from "@/types/types";
 import type { CartItem } from "@/lib/cart";
+import { UserError, withActionResult } from "@/lib/action-result";
 
 /** Promotions actives d'un produit à l'instant `now` (pas de promo par taille pour l'instant). */
 function activePromotionsFor(
@@ -19,12 +22,29 @@ function activePromotionsFor(
     .map((pp) => ({ discountPercent: pp.promotion.discountPercent }));
 }
 
-export async function createOrder(data: OrderInput) {
-  if (data.items.length === 0) {
-    throw new Error("Le panier est vide.");
+// Anti-spam : limites volontairement larges pour ne jamais gêner une vraie cliente
+const ORDER_LIMIT_PER_IP = 5;
+const ORDER_LIMIT_PER_PHONE = 3;
+const ORDER_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const TOO_MANY_ORDERS =
+  "Trop de commandes envoyées en peu de temps. Merci de patienter quelques minutes ou de nous contacter sur WhatsApp.";
+
+async function createOrderImpl(rawData: OrderInput) {
+  // Les server actions sont appelables avec n'importe quel payload : on revalide tout.
+  const data = parseOrderInput(rawData);
+
+  if (!checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS)) {
+    throw new UserError(TOO_MANY_ORDERS);
   }
 
   const now = new Date();
+
+  const recentOrdersForPhone = await prisma.order.count({
+    where: { phone: data.phone, createdAt: { gte: new Date(now.getTime() - ORDER_LIMIT_WINDOW_MS) } },
+  });
+  if (recentOrdersForPhone >= ORDER_LIMIT_PER_PHONE) {
+    throw new UserError(TOO_MANY_ORDERS);
+  }
 
   const order = await prisma.$transaction(async (tx) => {
     const productItems = data.items.filter(
@@ -58,12 +78,12 @@ export async function createOrder(data: OrderInput) {
     // 1. Validation + lignes produit (avec taille éventuelle)
     for (const item of productItems) {
       const product = productMap.get(item.productId);
-      if (!product || product.archived) throw new Error("Produit introuvable.");
+      if (!product || product.archived) throw new UserError("Produit introuvable.");
 
       const size = item.productSizeId
         ? product.sizes.find((s) => s.id === item.productSizeId && !s.archived)
         : null;
-      if (item.productSizeId && !size) throw new Error(`Déclinaison indisponible pour ${product.name}.`);
+      if (item.productSizeId && !size) throw new UserError(`Déclinaison indisponible pour ${product.name}.`);
 
       const basePrice = size ? size.price : product.price;
       const packPrices = product.packPrices
@@ -72,8 +92,15 @@ export async function createOrder(data: OrderInput) {
 
       // Les promotions sont définies au niveau du produit ; pas de promo par taille dans le schéma actuel.
       const activePromotions = size ? [] : activePromotionsFor(product, now);
+      const originalPrice = size ? null : product.originalPrice;
 
-      const lineTotal = resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, item.quantity);
+      const lineTotal = resolveDiscountedLineTotal(
+        basePrice,
+        activePromotions,
+        packPrices,
+        item.quantity,
+        originalPrice,
+      );
       estimatedTotal += lineTotal;
 
       orderItemsData.push({
@@ -88,7 +115,7 @@ export async function createOrder(data: OrderInput) {
     // 2. Validation + lignes kit (pas de promotion sur les kits dans le schéma actuel)
     for (const item of kitItems) {
       const kit = kitMap.get(item.kitId);
-      if (!kit || kit.archived) throw new Error("Kit introuvable.");
+      if (!kit || kit.archived) throw new UserError("Kit introuvable.");
 
       const lineTotal = kit.price * item.quantity;
       estimatedTotal += lineTotal;
@@ -109,13 +136,13 @@ export async function createOrder(data: OrderInput) {
           where: { id: item.productSizeId, stock: { gte: item.quantity } },
           data: { stock: { decrement: item.quantity } },
         });
-        if (result.count === 0) throw new Error(`Stock insuffisant pour ${product.name}.`);
+        if (result.count === 0) throw new UserError(`Stock insuffisant pour ${product.name}.`);
       } else {
         const result = await tx.product.updateMany({
           where: { id: item.productId, stock: { gte: item.quantity } },
           data: { stock: { decrement: item.quantity } },
         });
-        if (result.count === 0) throw new Error(`Stock insuffisant pour ${product.name}.`);
+        if (result.count === 0) throw new UserError(`Stock insuffisant pour ${product.name}.`);
       }
     }
 
@@ -129,13 +156,13 @@ export async function createOrder(data: OrderInput) {
             where: { id: kitItem.productSizeId, stock: { gte: neededQty } },
             data: { stock: { decrement: neededQty } },
           });
-          if (result.count === 0) throw new Error(`Stock insuffisant pour composer le kit "${kit.name}".`);
+          if (result.count === 0) throw new UserError(`Stock insuffisant pour composer le kit "${kit.name}".`);
         } else {
           const result = await tx.product.updateMany({
             where: { id: kitItem.productId, stock: { gte: neededQty } },
             data: { stock: { decrement: neededQty } },
           });
-          if (result.count === 0) throw new Error(`Stock insuffisant pour composer le kit "${kit.name}".`);
+          if (result.count === 0) throw new UserError(`Stock insuffisant pour composer le kit "${kit.name}".`);
         }
       }
     }
@@ -154,6 +181,7 @@ export async function createOrder(data: OrderInput) {
         comment: data.comment,
         estimatedTotal,
         finalTotal: estimatedTotal,
+        stockReserved: true, // stock décrémenté ci-dessus, restitué si annulation/suppression
         items: { create: orderItemsData },
         giftCard: data.gift
           ? {
@@ -200,7 +228,10 @@ export async function createOrder(data: OrderInput) {
  * en recalculant chaque total avec resolveDiscountedLineTotal (comme le client)
  * pour détecter fidèlement tout changement de prix, de stock ou de promotion.
  */
-export async function refreshCartPrices(items: CartItem[]) {
+async function refreshCartPricesImpl(items: CartItem[]) {
+  if (!Array.isArray(items) || items.length > MAX_ORDER_LINES) {
+    throw new UserError("Panier invalide.");
+  }
   if (items.length === 0) {
     return { items: [] as CartItem[], priceChanged: false, removedKeys: [] as string[] };
   }
@@ -230,7 +261,13 @@ export async function refreshCartPrices(items: CartItem[]) {
 
   const refreshedItems = items
     .map((item) => {
-      const oldTotal = resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity);
+      const oldTotal = resolveDiscountedLineTotal(
+        item.basePrice,
+        item.activePromotions,
+        item.packPrices,
+        item.quantity,
+        item.originalPrice,
+      );
 
       if (item.kind === "kit") {
         const kit = kitMap.get(item.kitId!);
@@ -249,6 +286,7 @@ export async function refreshCartPrices(items: CartItem[]) {
           ...item,
           name: kit.name,
           basePrice: kit.price,
+          originalPrice: null,
           activePromotions: [] as ActivePromotion[], // pas de promo sur les kits dans le schéma actuel
           packPrices: [],
           quantity,
@@ -276,15 +314,19 @@ export async function refreshCartPrices(items: CartItem[]) {
         .filter((p) => p.productSizeId === (size ? size.id : null))
         .map((p) => ({ quantity: p.quantity, price: p.price }));
       const activePromotions = size ? [] : activePromotionsFor(product, now);
+      const originalPrice = size ? null : product.originalPrice;
 
       const quantity = Math.min(item.quantity, Math.max(stock, 0));
-      if (resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity) !== oldTotal) priceChanged = true;
+      if (resolveDiscountedLineTotal(basePrice, activePromotions, packPrices, quantity, originalPrice) !== oldTotal) {
+        priceChanged = true;
+      }
 
       return {
         ...item,
         name: size ? `${product.name} — ${size.label}` : product.name,
         sizeLabel: size ? size.label : null,
         basePrice,
+        originalPrice,
         activePromotions,
         packPrices,
         quantity,
@@ -295,3 +337,11 @@ export async function refreshCartPrices(items: CartItem[]) {
 
   return { items: refreshedItems, priceChanged, removedKeys };
 }
+
+// ─── Exports ──────────────────────────────────────────────────────────────────
+// Enveloppées par withActionResult : renvoient { ok, data | error } au lieu de lever
+// une erreur, dont le message serait masqué par Next.js en production.
+// Côté client : const x = unwrapAction(xAction) — cf. lib/action-result.ts
+
+export const createOrder = withActionResult(createOrderImpl);
+export const refreshCartPrices = withActionResult(refreshCartPricesImpl);

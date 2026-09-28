@@ -3,7 +3,17 @@
 
 import { useRef, useState, useTransition } from "react";
 
-import { createCategory, deleteCategory, renameCategory } from "./actions";
+import { unwrapAction } from "@/lib/action-result";
+import {
+  createCategory as createCategoryAction,
+  deleteCategory as deleteCategoryAction,
+  renameCategory as renameCategoryAction,
+} from "./actions";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createCategory = unwrapAction(createCategoryAction);
+const deleteCategory = unwrapAction(deleteCategoryAction);
+const renameCategory = unwrapAction(renameCategoryAction);
 
 type Category = {
   id: string;

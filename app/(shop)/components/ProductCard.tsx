@@ -8,6 +8,7 @@ type ActivePromotion = { promotion: { discountPercent: number } };
 
 type ProductCardProduct = {
   id: string;
+  slug: string;
   name: string;
   description: string;
   price: number;
@@ -40,7 +41,7 @@ export function ProductCard({ product }: { product: ProductCardProduct }) {
 
   return (
     <Link
-      href={`/produits/${product.id}`}
+      href={`/produits/${product.slug}`}
       className="product-card flex flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-white"
       style={{ boxShadow: "0 4px 20px rgba(139,26,58,0.05)" }}
     >

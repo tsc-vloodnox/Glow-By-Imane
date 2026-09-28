@@ -3,7 +3,11 @@
 import { useTransition } from "react";
 
 import { type DeliveryStatus } from "@/lib/order-status";
-import { updateDeliveryStatus } from "../actions";
+import { updateDeliveryStatus as updateDeliveryStatusAction } from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const updateDeliveryStatus = unwrapAction(updateDeliveryStatusAction);
 
 type Props = {
   deliveryId: string;
@@ -42,7 +46,13 @@ export function LivraisonStatusButton({ deliveryId, currentStatus }: Props) {
       type="button"
       disabled={isPending}
       onClick={() =>
-        startTransition(() => updateDeliveryStatus(deliveryId, primaryAction.next))
+        startTransition(async () => {
+          try {
+            await updateDeliveryStatus(deliveryId, primaryAction.next);
+          } catch (err) {
+            window.alert(err instanceof Error ? err.message : "Erreur lors du changement de statut.");
+          }
+        })
       }
       className={`rounded-full px-3 py-1 text-xs font-medium transition-opacity disabled:opacity-50 ${primaryAction.style}`}
     >

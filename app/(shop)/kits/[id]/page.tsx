@@ -17,6 +17,9 @@ function getCatalogPath(imageName: string) {
     : `/catalogue/${encodedName}`;
 }
 
+// Stock des kits rafraîchi au plus toutes les 60 s
+export const revalidate = 60;
+
 export default async function KitPage({ params }: KitPageProps) {
   const { id } = await params;
 

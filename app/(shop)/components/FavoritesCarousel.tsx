@@ -5,6 +5,7 @@ import { ProductImage } from "./ProductImage";
 
 type FavoriteProduct = {
   id: string;
+  slug: string;
   name: string;
   price: number;
   stock: number;
@@ -23,7 +24,7 @@ export function FavoritesCarousel({ products }: { products: FavoriteProduct[] })
         {products.map((product) => (
           <Link
             key={product.id}
-            href={`/produits/${product.id}`}
+            href={`/produits/${product.slug}`}
             className="flex-none w-32 snap-start overflow-hidden rounded-2xl border border-[var(--color-border)] bg-white"
             style={{ boxShadow: "0 4px 20px rgba(139,26,58,0.05)" }}
           >

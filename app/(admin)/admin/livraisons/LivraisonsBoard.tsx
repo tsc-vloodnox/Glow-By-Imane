@@ -5,9 +5,19 @@ import { useMemo, useState, useTransition } from "react";
 
 import { DELIVERY_STATUS_CONFIG, type DeliveryStatus } from "@/lib/order-status";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
-import { assignLivreur, createLivreur, updateDeliveryFee } from "../actions";
+import {
+  assignLivreur as assignLivreurAction,
+  createLivreur as createLivreurAction,
+  updateDeliveryFee as updateDeliveryFeeAction,
+} from "../actions";
 import { LivraisonStatusButton } from "./LivraisonStatusButton";
 import { QuartierCopyButton } from "./QuartierCopyButton";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const assignLivreur = unwrapAction(assignLivreurAction);
+const createLivreur = unwrapAction(createLivreurAction);
+const updateDeliveryFee = unwrapAction(updateDeliveryFeeAction);
 
 type DeliveryRow = {
   id: string;

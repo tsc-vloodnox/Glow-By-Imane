@@ -3,12 +3,18 @@
 
 import { useState, useTransition } from "react";
 
+import { unwrapAction } from "@/lib/action-result";
 import {
-  createPromotion,
-  deletePromotion,
-  togglePromotion,
+  createPromotion as createPromotionAction,
+  deletePromotion as deletePromotionAction,
+  togglePromotion as togglePromotionAction,
   type PromotionInput,
 } from "./actions";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createPromotion = unwrapAction(createPromotionAction);
+const deletePromotion = unwrapAction(deletePromotionAction);
+const togglePromotion = unwrapAction(togglePromotionAction);
 
 type Product = { id: string; name: string; price: number; categoryName: string };
 
@@ -107,8 +113,8 @@ export function PromotionsClient({
               : p,
           ),
         );
-      } catch {
-        setError("Erreur lors de la mise à jour.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erreur lors de la mise à jour.");
       }
     });
   };
@@ -119,8 +125,8 @@ export function PromotionsClient({
       try {
         await deletePromotion(id);
         setPromotions((prev) => prev.filter((p) => p.id !== id));
-      } catch {
-        setError("Erreur lors de la suppression.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erreur lors de la suppression.");
       }
     });
   };

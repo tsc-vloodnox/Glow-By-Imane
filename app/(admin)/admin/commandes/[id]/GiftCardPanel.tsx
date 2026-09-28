@@ -5,13 +5,21 @@ import { useState, useTransition } from "react";
 import { catalogPath } from "@/lib/images";
 import { buildDefaultGiftMessage, giftCardUrl, GIFT_PRINT_FEE } from "@/lib/gift-card";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
-import { uploadProductImage } from "../../produits/upload";
+import { uploadProductImage as uploadProductImageAction } from "../../produits/upload";
 import {
-  publishGiftCard,
-  unpublishGiftCard,
-  updateGiftCard,
-  updateGiftCardPhoto,
+  publishGiftCard as publishGiftCardAction,
+  unpublishGiftCard as unpublishGiftCardAction,
+  updateGiftCard as updateGiftCardAction,
+  updateGiftCardPhoto as updateGiftCardPhotoAction,
 } from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const uploadProductImage = unwrapAction(uploadProductImageAction);
+const publishGiftCard = unwrapAction(publishGiftCardAction);
+const unpublishGiftCard = unwrapAction(unpublishGiftCardAction);
+const updateGiftCard = unwrapAction(updateGiftCardAction);
+const updateGiftCardPhoto = unwrapAction(updateGiftCardPhotoAction);
 
 type GiftCardData = {
   recipientName: string;

@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { updateOrderDiscount } from "../actions";
+import { updateOrderDiscount as updateOrderDiscountAction } from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const updateOrderDiscount = unwrapAction(updateOrderDiscountAction);
 
 type Props = {
   orderId: string;

@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { createAdminOrder } from "../actions";
+import { createAdminOrder as createAdminOrderAction } from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createAdminOrder = unwrapAction(createAdminOrderAction);
 
 type Product = { id: string; name: string; price: number; categoryId: string };
 

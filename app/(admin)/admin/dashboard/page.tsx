@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { withDatabaseFallback } from "@/lib/db";
+import { requireAdmin } from "../actions";
 
 const statusLabels: Record<string, string> = {
   NOUVELLE: "Nouvelle",
@@ -17,6 +18,10 @@ type RecentOrder = Awaited<ReturnType<typeof prisma.order.findMany>>[number];
 type LowStockProduct = { id: string; name: string; stock: number };
 
 export default async function AdminDashboardPage() {
+  // Lit le cookie de session → page rendue à chaque visite (sinon Next la pré-générait
+  // au build et les statistiques restaient figées)
+  await requireAdmin();
+
   const [
     orderCount,
     productCount,

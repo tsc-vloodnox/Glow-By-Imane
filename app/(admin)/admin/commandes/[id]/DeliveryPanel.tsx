@@ -4,7 +4,15 @@ import { useState, useTransition } from "react";
 
 import { DELIVERY_STATUS_CONFIG, type DeliveryStatus } from "@/lib/order-status";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
-import { createDelivery, updateDeliveryStatus } from "../../actions";
+import {
+  createDelivery as createDeliveryAction,
+  updateDeliveryStatus as updateDeliveryStatusAction,
+} from "../../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createDelivery = unwrapAction(createDeliveryAction);
+const updateDeliveryStatus = unwrapAction(updateDeliveryStatusAction);
 
 type DeliveryData = {
   id: string;
@@ -89,11 +97,16 @@ export function DeliveryPanel({
   }
 
   async function handleStatusChange(deliveryId: string, status: DeliveryStatus) {
+    setError(null);
     startTransition(async () => {
-      await updateDeliveryStatus(deliveryId, status);
-      setLocalDelivery((prev) =>
-        prev ? { ...prev, status, deliveredAt: status === "LIVREE" ? new Date() : prev.deliveredAt } : prev,
-      );
+      try {
+        await updateDeliveryStatus(deliveryId, status);
+        setLocalDelivery((prev) =>
+          prev ? { ...prev, status, deliveredAt: status === "LIVREE" ? new Date() : prev.deliveredAt } : prev,
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erreur lors du changement de statut.");
+      }
     });
   }
 

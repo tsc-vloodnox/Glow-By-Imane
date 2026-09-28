@@ -2,7 +2,17 @@
 
 import { useState, useTransition } from "react";
 
-import { createLivreur, toggleLivreurActive, updateLivreur } from "../actions";
+import {
+  createLivreur as createLivreurAction,
+  toggleLivreurActive as toggleLivreurActiveAction,
+  updateLivreur as updateLivreurAction,
+} from "../actions";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createLivreur = unwrapAction(createLivreurAction);
+const toggleLivreurActive = unwrapAction(toggleLivreurActiveAction);
+const updateLivreur = unwrapAction(updateLivreurAction);
 
 type LivreurRow = {
   id: string;

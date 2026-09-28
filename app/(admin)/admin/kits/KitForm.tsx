@@ -4,8 +4,14 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createKit, updateKit } from "../actions";
-import { uploadProductImage } from "../produits/upload";
+import { createKit as createKitAction, updateKit as updateKitAction } from "../actions";
+import { uploadProductImage as uploadProductImageAction } from "../produits/upload";
+import { unwrapAction } from "@/lib/action-result";
+
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createKit = unwrapAction(createKitAction);
+const updateKit = unwrapAction(updateKitAction);
+const uploadProductImage = unwrapAction(uploadProductImageAction);
 
 type KitItemInput = {
   id: string; // id réel si existant, "tmp_..." si pas encore enregistré

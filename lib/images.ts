@@ -16,6 +16,7 @@ export function catalogPath(imageName: string | undefined | null): string | null
     return imageName;
   }
 
-  const encodedName = encodeURIComponent(imageName);
+  // Encode chaque segment séparément pour conserver les sous-dossiers (ex: "gifts/xxx.webp")
+  const encodedName = imageName.split("/").map(encodeURIComponent).join("/");
   return `${supabaseUrl}/storage/v1/object/public/catalogue/${encodedName}`;
 }

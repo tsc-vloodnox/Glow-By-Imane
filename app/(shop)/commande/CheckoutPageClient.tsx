@@ -4,14 +4,19 @@ import imageCompression from "browser-image-compression";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { createOrder, refreshCartPrices } from "../actions";
+import { createOrder as createOrderAction, refreshCartPrices as refreshCartPricesAction } from "../actions";
 import { useCart } from "../CartContext";
 import { resolveDiscountedLineTotal } from "@/lib/pricing";
 import { trackPixelEvent } from "@/lib/fbpixel";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
-import { uploadGiftPhoto } from "./gift-upload";
+import { GUINEA_PHONE_PATTERN as PHONE_PATTERN } from "@/lib/order-validation";
+import { uploadGiftPhoto as uploadGiftPhotoAction } from "./gift-upload";
+import { unwrapAction } from "@/lib/action-result";
 
-const PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
+// Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
+const createOrder = unwrapAction(createOrderAction);
+const refreshCartPrices = unwrapAction(refreshCartPricesAction);
+const uploadGiftPhoto = unwrapAction(uploadGiftPhotoAction);
 
 // Compresse et convertit une image en WebP avant l'upload (photo de carte cadeau).
 async function compressImage(file: File): Promise<File> {
@@ -194,9 +199,13 @@ export default function CheckoutPageClient() {
             <div key={item.cartKey} className="flex items-center justify-between">
               <span>{item.name} x{item.quantity}</span>
               <span>
-                {resolveDiscountedLineTotal(item.basePrice, item.activePromotions, item.packPrices, item.quantity).toLocaleString(
-                  "fr-GN",
-                )}{" "}
+                {resolveDiscountedLineTotal(
+                  item.basePrice,
+                  item.activePromotions,
+                  item.packPrices,
+                  item.quantity,
+                  item.originalPrice,
+                ).toLocaleString("fr-GN")}{" "}
                 GNF
               </span>
             </div>
