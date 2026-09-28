@@ -27,6 +27,11 @@ WHERE ranked."id" = p."id" AND ranked.rn > 1;
 
 ALTER TABLE "Product" ALTER COLUMN "slug" SET NOT NULL;
 
+-- Valeur par défaut : rend la migration rétrocompatible. L'ancienne version du code
+-- (qui ne connaît pas "slug") peut continuer à créer des produits si la migration est
+-- appliquée avant le déploiement. La nouvelle version fournit toujours un vrai slug.
+ALTER TABLE "Product" ALTER COLUMN "slug" SET DEFAULT ('produit-' || substr(md5(random()::text || clock_timestamp()::text), 1, 10));
+
 CREATE UNIQUE INDEX "Product_slug_key" ON "Product"("slug");
 
 -- Order.updatedAt ---------------------------------------------------------------

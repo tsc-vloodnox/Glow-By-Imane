@@ -41,7 +41,9 @@ model Product {
   id            String      @id @default(cuid())
   name          String
   /// Identifiant lisible dans l'URL (/produits/<slug>), généré à la création, stable ensuite.
-  slug          String      @unique
+  /// Le défaut côté base ne sert qu'à l'ancienne version du code (migration rétrocompatible) :
+  /// createProduct fournit toujours un vrai slug (lib/slug.ts).
+  slug          String      @unique @default(dbgenerated("('produit-'::text || substr(md5(((random())::text || (clock_timestamp())::text)), 1, 10))"))
   description   String
   price         Int
   originalPrice Int?
