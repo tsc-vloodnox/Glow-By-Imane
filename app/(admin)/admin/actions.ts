@@ -4,10 +4,13 @@ import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 import { UserError, withActionResult } from "@/lib/action-result";
 import { toDate, toInt, toJsonArray } from "@/lib/form-validation";
+import { uniqueProductSlug } from "@/lib/slug";
 
 const isBlank = (value: unknown) => value === undefined || value === null || value === "";
 
@@ -95,8 +98,8 @@ function parseProductFormData(formData: FormData) {
  * - Retourne une correspondance id-temporaire → id-réel, utile pour résoudre les paliers
  *   de prix qui référencent une taille tout juste créée.
  */
-async function syncProductSizes(productId: string, sizes: SizeInput[]) {
-  const existing = await prisma.productSize.findMany({
+async function syncProductSizes(tx: Prisma.TransactionClient, productId: string, sizes: SizeInput[]) {
+  const existing = await tx.productSize.findMany({
     where: { productId },
     select: { id: true },
   });
@@ -105,11 +108,11 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   for (const id of toRemove) {
-    const hasOrders = await prisma.orderItem.count({ where: { productSizeId: id } });
+    const hasOrders = await tx.orderItem.count({ where: { productSizeId: id } });
     if (hasOrders > 0) {
-      await prisma.productSize.update({ where: { id }, data: { archived: true } });
+      await tx.productSize.update({ where: { id }, data: { archived: true } });
     } else {
-      await prisma.productSize.delete({ where: { id } });
+      await tx.productSize.delete({ where: { id } });
     }
   }
 
@@ -118,12 +121,12 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
   for (const [i, s] of sizes.entries()) {
     const label = s.label.trim();
     if (s.id && existingIds.has(s.id)) {
-      await prisma.productSize.update({
+      await tx.productSize.update({
         where: { id: s.id },
         data: { label, price: s.price, stock: s.stock, position: i, archived: s.archived ?? false },
       });
     } else {
-      const created = await prisma.productSize.create({
+      const created = await tx.productSize.create({
         data: {
           productId,
           label,
@@ -147,11 +150,12 @@ async function syncProductSizes(productId: string, sizes: SizeInput[]) {
  * directe possible.
  */
 async function syncPackPrices(
+  tx: Prisma.TransactionClient,
   productId: string,
   packPrices: PackPriceInput[],
   sizeTempIdMap: Map<string, string>,
 ) {
-  const existing = await prisma.productPackPrice.findMany({
+  const existing = await tx.productPackPrice.findMany({
     where: { productId },
     select: { id: true },
   });
@@ -160,7 +164,7 @@ async function syncPackPrices(
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   if (toRemove.length > 0) {
-    await prisma.productPackPrice.deleteMany({ where: { id: { in: toRemove } } });
+    await tx.productPackPrice.deleteMany({ where: { id: { in: toRemove } } });
   }
 
   for (const [i, p] of packPrices.entries()) {
@@ -169,12 +173,12 @@ async function syncPackPrices(
       : null;
 
     if (p.id && existingIds.has(p.id)) {
-      await prisma.productPackPrice.update({
+      await tx.productPackPrice.update({
         where: { id: p.id },
         data: { quantity: p.quantity, price: p.price, productSizeId: resolvedSizeId, position: i },
       });
     } else {
-      await prisma.productPackPrice.create({
+      await tx.productPackPrice.create({
         data: {
           productId,
           quantity: p.quantity,
@@ -187,6 +191,9 @@ async function syncPackPrices(
   }
 }
 
+// Synchronisations en plusieurs requêtes : délai plus large que les 5 s par défaut
+const SYNC_TRANSACTION_OPTIONS = { timeout: 20_000 };
+
 const productWithPricingInclude = {
   sizes: { orderBy: { position: "asc" as const } },
   packPrices: { orderBy: { position: "asc" as const } },
@@ -196,9 +203,14 @@ async function createProductImpl(formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
-  const product = await prisma.product.create({ data });
-  const sizeTempIdMap = await syncProductSizes(product.id, sizes);
-  await syncPackPrices(product.id, packPrices, sizeTempIdMap);
+  // Tout ou rien : un échec en cours de route ne laisse pas un produit à moitié enregistré
+  const product = await prisma.$transaction(async (tx) => {
+    const slug = await uniqueProductSlug(tx, data.name);
+    const created = await tx.product.create({ data: { ...data, slug } });
+    const sizeTempIdMap = await syncProductSizes(tx, created.id, sizes);
+    await syncPackPrices(tx, created.id, packPrices, sizeTempIdMap);
+    return created;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/produits");
   revalidateCatalogue();
@@ -213,14 +225,18 @@ async function updateProductImpl(productId: string, formData: FormData) {
   await requireAdmin();
   const { sizes, packPrices, ...data } = parseProductFormData(formData);
 
-  await prisma.product.update({ where: { id: productId }, data });
-  const sizeTempIdMap = await syncProductSizes(productId, sizes);
-  await syncPackPrices(productId, packPrices, sizeTempIdMap);
+  // Tout ou rien : un échec en cours de route ne laisse pas un produit à moitié modifié
+  const { slug } = await prisma.$transaction(async (tx) => {
+    const updated = await tx.product.update({ where: { id: productId }, data });
+    const sizeTempIdMap = await syncProductSizes(tx, productId, sizes);
+    await syncPackPrices(tx, productId, packPrices, sizeTempIdMap);
+    return updated;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/produits");
   revalidateCatalogue();
   // Invalide aussi la page produit individuelle
-  revalidatePath(`/produits/${productId}`);
+  revalidatePath(`/produits/${slug}`);
 
   return prisma.product.findUniqueOrThrow({
     where: { id: productId },
@@ -268,7 +284,17 @@ async function deleteProductImpl(productId: string) {
     );
   }
 
-  await prisma.product.delete({ where: { id: productId } });
+  const usedInKits = await prisma.kitItem.count({ where: { productId } });
+  if (usedInKits > 0) {
+    throw new UserError("Ce produit fait partie d'un kit. Retirez-le du kit ou archivez-le.");
+  }
+
+  // Tailles et paliers n'ont pas de suppression en cascade : on les retire avec le produit
+  await prisma.$transaction([
+    prisma.productPackPrice.deleteMany({ where: { productId } }),
+    prisma.productSize.deleteMany({ where: { productId } }),
+    prisma.product.delete({ where: { id: productId } }),
+  ]);
   revalidatePath("/admin/produits");
   revalidateCatalogue();
 }
@@ -308,14 +334,14 @@ function parseKitFormData(formData: FormData) {
  * Pas de contrainte d'historique : le contenu figé d'un kit déjà commandé vit dans
  * OrderItem (quantité + prix au moment de la commande), donc suppression directe possible.
  */
-async function syncKitItems(kitId: string, items: KitItemInput[]) {
-  const existing = await prisma.kitItem.findMany({ where: { kitId }, select: { id: true } });
+async function syncKitItems(tx: Prisma.TransactionClient, kitId: string, items: KitItemInput[]) {
+  const existing = await tx.kitItem.findMany({ where: { kitId }, select: { id: true } });
   const existingIds = new Set(existing.map((i) => i.id));
   const incomingIds = new Set(items.filter((i) => i.id).map((i) => i.id as string));
 
   const toRemove = [...existingIds].filter((id) => !incomingIds.has(id));
   if (toRemove.length > 0) {
-    await prisma.kitItem.deleteMany({ where: { id: { in: toRemove } } });
+    await tx.kitItem.deleteMany({ where: { id: { in: toRemove } } });
   }
 
   for (const item of items) {
@@ -326,9 +352,9 @@ async function syncKitItems(kitId: string, items: KitItemInput[]) {
       quantity: item.quantity,
     };
     if (item.id && existingIds.has(item.id)) {
-      await prisma.kitItem.update({ where: { id: item.id }, data });
+      await tx.kitItem.update({ where: { id: item.id }, data });
     } else {
-      await prisma.kitItem.create({ data });
+      await tx.kitItem.create({ data });
     }
   }
 }
@@ -346,8 +372,11 @@ async function createKitImpl(formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
-  const kit = await prisma.kit.create({ data });
-  await syncKitItems(kit.id, items);
+  const kit = await prisma.$transaction(async (tx) => {
+    const created = await tx.kit.create({ data });
+    await syncKitItems(tx, created.id, items);
+    return created;
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/kits");
   revalidateCatalogue();
@@ -362,8 +391,10 @@ async function updateKitImpl(kitId: string, formData: FormData) {
   await requireAdmin();
   const { items, ...data } = parseKitFormData(formData);
 
-  await prisma.kit.update({ where: { id: kitId }, data });
-  await syncKitItems(kitId, items);
+  await prisma.$transaction(async (tx) => {
+    await tx.kit.update({ where: { id: kitId }, data });
+    await syncKitItems(tx, kitId, items);
+  }, SYNC_TRANSACTION_OPTIONS);
 
   revalidatePath("/admin/kits");
   revalidateCatalogue();
@@ -405,8 +436,10 @@ async function deleteKitImpl(kitId: string) {
     throw new UserError("Ce kit a des commandes associées. Archivez-le plutôt que de le supprimer.");
   }
 
-  await prisma.kitItem.deleteMany({ where: { kitId } });
-  await prisma.kit.delete({ where: { id: kitId } });
+  await prisma.$transaction([
+    prisma.kitItem.deleteMany({ where: { kitId } }),
+    prisma.kit.delete({ where: { id: kitId } }),
+  ]);
   revalidatePath("/admin/kits");
   revalidateCatalogue();
 }

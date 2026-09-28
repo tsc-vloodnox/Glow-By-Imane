@@ -491,7 +491,27 @@ async function main() {
     },
   ];
 
-  await prisma.product.createMany({ data: products });
+  // Même logique que lib/slug.ts (le seed est en JS pur, sans import TypeScript)
+  const slugify = (value) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/œ/gi, "oe")
+      .replace(/æ/gi, "ae")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+  const usedSlugs = new Set();
+  const productsWithSlug = products.map((product) => {
+    const base = slugify(product.name) || "produit";
+    let slug = base;
+    for (let n = 2; usedSlugs.has(slug); n++) slug = `${base}-${n}`;
+    usedSlugs.add(slug);
+    return { ...product, slug };
+  });
+
+  await prisma.product.createMany({ data: productsWithSlug });
   console.log(`Seed terminé : ${categories.length} catégories et ${products.length} produits créés.`);
 }
 

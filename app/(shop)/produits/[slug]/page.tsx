@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { cache } from "react";
 
 import { ProductAddToCart } from "../../components/ProductAddToCart";
@@ -17,8 +17,9 @@ export const revalidate = 60;
 // Fetch partagé pour ne pas appeler Prisma deux fois (generateMetadata + page)
 const getProduct = cache(async (slug: string) => {
   const now = new Date();
-  return prisma.product.findUnique({
-    where: { id: slug },
+  // Recherche par slug ; l'id reste accepté pour les anciens liens (redirigés ci-dessous)
+  return prisma.product.findFirst({
+    where: { OR: [{ slug }, { id: slug }] },
     include: {
       category: true,
       sizes: { where: { archived: false }, orderBy: { position: "asc" } },
@@ -43,10 +44,11 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   return {
     title: product.name,
     description: product.description,
+    alternates: { canonical: `/produits/${product.slug}` },
     openGraph: {
       title: `${product.name} | Glow by Imane`,
       description: product.description,
-      url: `https://glowbyimane.com/produits/${product.id}`,
+      url: `https://glowbyimane.com/produits/${product.slug}`,
       images: imageUrl
         ? [
             {
@@ -74,6 +76,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   if (!product) {
     notFound();
+  }
+
+  // Ancien lien /produits/<id> → URL canonique /produits/<slug> (301, garde le référencement)
+  if (slug !== product.slug) {
+    permanentRedirect(`/produits/${product.slug}`);
   }
 
   const galleryImages =
