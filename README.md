@@ -436,3 +436,6 @@ Dashboard admin → **Notifications de commandes → Activer** (à faire sur cha
 
 - **Fidélité / VIP** : les champs existent sur `Customer`, les règles (points par GNF, avantages, seuil VIP) restent à définir.
 - **Prix revendeur publics** : aujourd'hui les prix de gros sont indicatifs (paliers existants) puis négociés ; des paliers spécifiques revendeurs pourraient être ajoutés.
+
+
+v2
