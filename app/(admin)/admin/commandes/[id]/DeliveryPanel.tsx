@@ -1,17 +1,21 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { DELIVERY_STATUS_CONFIG, type DeliveryStatus } from "@/lib/order-status";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import {
   createDelivery as createDeliveryAction,
+  updateDelivery as updateDeliveryAction,
   updateDeliveryStatus as updateDeliveryStatusAction,
 } from "../../actions";
 import { unwrapAction } from "@/lib/action-result";
 
 // Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
 const createDelivery = unwrapAction(createDeliveryAction);
+const updateDelivery = unwrapAction(updateDeliveryAction);
 const updateDeliveryStatus = unwrapAction(updateDeliveryStatusAction);
 
 type DeliveryData = {
@@ -19,9 +23,11 @@ type DeliveryData = {
   status: string;
   scheduledAt: Date;
   deliveredAt: Date | null;
+  livreurId: string | null;
   livreur: string | null;
   deliveryFee: number;
   notes: string | null;
+  run: { id: string; settled: boolean } | null;
 } | null;
 
 type GiftDelivery = { recipientName: string; recipientAddress: string } | null;
@@ -35,9 +41,26 @@ type Props = {
   orderFinalTotal: number;
   /** Frais proposés par défaut à la planification (bas de la fourchette annoncée) */
   suggestedFee?: number | null;
+  /** Commande à retirer en boutique : la planification reste possible si la cliente change d'avis */
+  isPickup?: boolean;
+  livreurs: { id: string; name: string }[];
   delivery: DeliveryData;
   giftDelivery?: GiftDelivery;
 };
+
+/** Valeur pour <input type="datetime-local"> (heure locale du navigateur) */
+function toLocalInput(date: Date) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function defaultSchedule() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(10, 0, 0, 0);
+  return toLocalInput(d);
+}
 
 export function DeliveryPanel({
   orderId,
@@ -47,13 +70,18 @@ export function DeliveryPanel({
   orderQuartier,
   orderFinalTotal,
   suggestedFee,
+  isPickup,
+  livreurs,
   delivery,
   giftDelivery,
 }: Props) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [editing, setEditing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [localDelivery, setLocalDelivery] = useState(delivery);
+  const localDelivery = delivery;
+  const locked = delivery?.run?.settled ?? false;
 
   function buildWhatsAppMessage(scheduledDate: string) {
     const date = new Date(scheduledDate);
@@ -73,44 +101,98 @@ export function DeliveryPanel({
     );
   }
 
-  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function act(action: () => Promise<unknown>, after?: () => void) {
     setError(null);
-    const formData = new FormData(event.currentTarget);
-    formData.set("orderId", orderId);
-
     startTransition(async () => {
       try {
-        await createDelivery(formData);
-        const scheduledAt = new Date(String(formData.get("scheduledAt")));
-        setLocalDelivery({
-          id: "pending",
-          status: "PLANIFIEE",
-          scheduledAt,
-          deliveredAt: null,
-          livreur: String(formData.get("livreur") ?? "") || null,
-          deliveryFee: Math.max(0, Number(formData.get("deliveryFee") ?? 0)),
-          notes: String(formData.get("notes") ?? "") || null,
-        });
-        setShowForm(false);
+        await action();
+        after?.();
+        router.refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Erreur lors de la planification.");
+        setError(err instanceof Error ? err.message : "Erreur.");
       }
     });
   }
 
-  async function handleStatusChange(deliveryId: string, status: DeliveryStatus) {
-    setError(null);
-    startTransition(async () => {
-      try {
-        await updateDeliveryStatus(deliveryId, status);
-        setLocalDelivery((prev) =>
-          prev ? { ...prev, status, deliveredAt: status === "LIVREE" ? new Date() : prev.deliveredAt } : prev,
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Erreur lors du changement de statut.");
-      }
-    });
+  function handleCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    formData.set("orderId", orderId);
+    act(() => createDelivery(formData), () => setShowForm(false));
+  }
+
+  function handleUpdate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    act(() => updateDelivery(localDelivery!.id, formData), () => setEditing(false));
+  }
+
+  function handleStatusChange(deliveryId: string, status: DeliveryStatus) {
+    act(() => updateDeliveryStatus(deliveryId, status));
+  }
+
+  /** Champs communs création / modification */
+  function fields(initial: { scheduledAt: string; livreurId: string; deliveryFee: number; notes: string }) {
+    return (
+      <>
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Date et heure</span>
+          <input
+            type="datetime-local"
+            name="scheduledAt"
+            required
+            defaultValue={initial.scheduledAt}
+            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
+          />
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Livreur</span>
+          <select
+            name="livreurId"
+            defaultValue={initial.livreurId}
+            className="w-full rounded-xl border border-[var(--color-border)] bg-white px-4 py-2.5 text-sm"
+          >
+            <option value="">Non attribué</option>
+            {livreurs.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+          {livreurs.length === 0 && (
+            <span className="block text-xs text-[var(--color-muted)]">
+              Aucun livreur actif.{" "}
+              <Link href="/admin/livreurs" className="text-[var(--color-accent)] underline">Ajouter un livreur</Link>
+            </span>
+          )}
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Frais de livraison payés par la cliente (GNF)</span>
+          <input
+            type="number"
+            name="deliveryFee"
+            min="0"
+            step="500"
+            defaultValue={initial.deliveryFee}
+            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
+            placeholder="0"
+          />
+          <span className="block text-xs text-[var(--color-muted)]">0 = livraison offerte / exemptée.</span>
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium">Notes (optionnel)</span>
+          <textarea
+            name="notes"
+            rows={2}
+            maxLength={500}
+            defaultValue={initial.notes}
+            placeholder="Point de repère, instructions spéciales…"
+            className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
+          />
+        </label>
+      </>
+    );
   }
 
   const deliveryCfg = localDelivery
@@ -146,7 +228,9 @@ export function DeliveryPanel({
       {/* Pas encore de livraison */}
       {!localDelivery && !showForm && (
         <div className="flex flex-col items-start gap-3">
-          <p className="text-sm text-[var(--color-muted)]">Aucune livraison planifiée.</p>
+          <p className="text-sm text-[var(--color-muted)]">
+            {isPickup ? "Retrait en boutique : rien à planifier, sauf si la cliente demande finalement une livraison." : "Aucune livraison planifiée."}
+          </p>
           <button
             type="button"
             onClick={() => setShowForm(true)}
@@ -160,47 +244,7 @@ export function DeliveryPanel({
       {/* Formulaire */}
       {!localDelivery && showForm && (
         <form onSubmit={handleCreate} className="space-y-3">
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Date et heure</span>
-            <input
-              type="datetime-local"
-              name="scheduledAt"
-              required
-              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
-            />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Livreur (optionnel)</span>
-            <input
-              type="text"
-              name="livreur"
-              placeholder="Prénom du livreur"
-              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
-            />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Frais de livraison (GNF)</span>
-            <input
-              type="number"
-              name="deliveryFee"
-              min="0"
-              defaultValue={suggestedFee ?? 0}
-              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
-              placeholder="0"
-            />
-          </label>
-
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Notes (optionnel)</span>
-            <textarea
-              name="notes"
-              rows={2}
-              placeholder="Point de repère, instructions spéciales…"
-              className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
-            />
-          </label>
+          {fields({ scheduledAt: defaultSchedule(), livreurId: "", deliveryFee: suggestedFee ?? 0, notes: "" })}
 
           <div className="flex gap-2">
             <button
@@ -218,7 +262,33 @@ export function DeliveryPanel({
       )}
 
       {/* Livraison existante */}
-      {localDelivery && (
+      {localDelivery && editing && (
+        <form onSubmit={handleUpdate} className="space-y-3">
+          {fields({
+            scheduledAt: toLocalInput(localDelivery.scheduledAt),
+            livreurId: localDelivery.livreurId ?? "",
+            deliveryFee: localDelivery.deliveryFee,
+            notes: localDelivery.notes ?? "",
+          })}
+          {localDelivery.run && (
+            <p className="text-xs text-[var(--color-muted)]">Changer de livreur retire la livraison de sa tournée actuelle.</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {isPending ? "Enregistrement…" : "Enregistrer"}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="text-sm text-[var(--color-muted)]">
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
+
+      {localDelivery && !editing && (
         <div className="space-y-3">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             <div>
@@ -233,12 +303,12 @@ export function DeliveryPanel({
                 })}
               </dd>
             </div>
-            {localDelivery.livreur && (
-              <div>
-                <dt className="text-[var(--color-muted)]">Livreur</dt>
-                <dd className="font-medium">{localDelivery.livreur}</dd>
-              </div>
-            )}
+            <div>
+              <dt className="text-[var(--color-muted)]">Livreur</dt>
+              <dd className={`font-medium ${localDelivery.livreur ? "" : "text-amber-600"}`}>
+                {localDelivery.livreur ?? "Non attribué"}
+              </dd>
+            </div>
             <div>
               <dt className="text-[var(--color-muted)]">Frais livraison</dt>
               <dd className="font-medium">
@@ -274,7 +344,22 @@ export function DeliveryPanel({
             )}
           </dl>
 
-          {localDelivery.status !== "LIVREE" && localDelivery.id !== "pending" && (
+          {(localDelivery.run || !locked) && (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              {!locked && (
+                <button type="button" onClick={() => setEditing(true)} className="text-[var(--color-accent)] underline">
+                  Modifier (date, livreur, frais)
+                </button>
+              )}
+              {localDelivery.run && (
+                <Link href={`/admin/livraisons/tournees/${localDelivery.run.id}`} className="text-indigo-600 hover:underline">
+                  🗺 Voir la tournée{locked ? " (réglée)" : ""}
+                </Link>
+              )}
+            </div>
+          )}
+
+          {localDelivery.status !== "LIVREE" && (
             <div className="flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3">
               {localDelivery.status === "PLANIFIEE" && (
                 <button

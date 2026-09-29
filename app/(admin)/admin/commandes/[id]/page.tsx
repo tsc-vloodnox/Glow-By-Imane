@@ -38,7 +38,7 @@ export default async function OrderDetailPage({ params }: Props) {
         },
       },
       customer: true,
-      delivery: true,
+      delivery: { include: { livreur: { select: { name: true } }, run: { select: { id: true, settledAt: true } } } },
       quartierRef: { select: { name: true, lat: true, lng: true } },
       pickupPoint: { select: { name: true, lat: true, lng: true } },
       giftCard: true,
@@ -46,6 +46,12 @@ export default async function OrderDetailPage({ params }: Props) {
   });
 
   if (!order) notFound();
+
+  const livreurs = await prisma.livreur.findMany({
+    where: { OR: [{ active: true }, ...(order.delivery?.livreurId ? [{ id: order.delivery.livreurId }] : [])] },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
   const isWholesale = order.kind === "GROS";
@@ -173,12 +179,16 @@ export default async function OrderDetailPage({ params }: Props) {
             orderQuartier={order.quartier}
             orderFinalTotal={order.finalTotal}
             suggestedFee={isPickup ? 0 : order.deliveryFeeMin}
+            isPickup={isPickup}
+            livreurs={livreurs}
             delivery={order.delivery ? {
               id: order.delivery.id,
               status: order.delivery.status,
               scheduledAt: order.delivery.scheduledAt,
               deliveredAt: order.delivery.deliveredAt,
-              livreur: order.delivery.livreurId ?? null,
+              livreurId: order.delivery.livreurId,
+              livreur: order.delivery.livreur?.name ?? null,
+              run: order.delivery.run ? { id: order.delivery.run.id, settled: order.delivery.run.settledAt != null } : null,
               deliveryFee: order.delivery.deliveryFee ?? 0,
               notes: order.delivery.notes,
             } : null}
