@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { withDatabaseFallback } from "@/lib/db";
 import { getRestockNeeds } from "@/lib/restock";
 import { requireAdmin } from "../actions";
+import { PushNotificationsToggle } from "../_components/PushNotificationsToggle";
 
 const statusLabels: Record<string, string> = {
   NOUVELLE: "Nouvelle",
@@ -84,6 +85,8 @@ export default async function AdminDashboardPage() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <p className="text-sm text-[var(--color-muted)]">Glow by Imane — Admin</p>
       </div>
+
+      <PushNotificationsToggle />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-xl border border-[var(--color-border)] bg-white p-6">

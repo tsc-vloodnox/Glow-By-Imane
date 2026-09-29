@@ -2,10 +2,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { UserError, withActionResult } from "@/lib/action-result";
 import { upsertCustomer } from "@/lib/customers";
 import { prisma } from "@/lib/prisma";
+import { notifyNewOrder } from "@/lib/push";
 import { resolveDiscountedLineTotal } from "@/lib/pricing";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { buildWholesaleMessage } from "@/lib/whatsapp";
@@ -107,6 +109,10 @@ async function createWholesaleRequestImpl(raw: unknown) {
   });
 
   revalidatePath("/admin/commandes");
+  // Notification à l'admin après la réponse : n'ajoute aucun délai pour le revendeur
+  after(() =>
+    notifyNewOrder({ id: order.id, number: order.number, name: data.businessName ?? data.name, finalTotal: estimatedTotal, kind: "GROS" }),
+  );
 
   return buildWholesaleMessage({
     number: order.number,

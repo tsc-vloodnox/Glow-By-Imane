@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
 import { upsertCustomer } from "@/lib/customers";
+import { notifyNewOrder } from "@/lib/push";
 import { MAX_ORDER_LINES, parseOrderInput } from "@/lib/order-validation";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { CartItemInput, OrderInput } from "@/types/types";
@@ -223,6 +225,8 @@ async function createOrderImpl(rawData: OrderInput) {
   });
 
   revalidatePath("/admin/commandes");
+  // Notification à l'admin après la réponse : n'ajoute aucun délai pour la cliente
+  after(() => notifyNewOrder({ ...order, kind: "DETAIL" }));
 
   return buildOrderMessage(
     order,
