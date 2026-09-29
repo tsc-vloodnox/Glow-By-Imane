@@ -238,7 +238,7 @@ mis à jour vers `LIVREE` (`updateDeliveryStatus` dans `app/admin/actions.ts`) �
 Accueil/Shop (hero + catalogue groupé) → Fiche produit → Panier → Commande → WhatsApp
 ```
 
-Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment de la commande. La commande est enregistrée en base, puis le client est redirigé vers WhatsApp avec un message pré-rempli contenant le détail complet (`buildOrderMessage` dans `lib/whatsapp.ts`).
+Aucun compte requis. Le client renseigne nom, téléphone et choisit **Livraison** (quartier dans la liste avec la fourchette de frais, ou « Autre quartier », position partagée en option — cf. `/confidentialite`) ou **Retrait en boutique** (gratuit). La commande est enregistrée en base, puis le client est redirigé vers WhatsApp avec un message pré-rempli contenant le détail complet (`buildOrderMessage` dans `lib/whatsapp.ts`).
 
 ### Panier client (`lib/cart.ts`)
 
@@ -303,6 +303,24 @@ Aucun compte requis. Le client renseigne nom, téléphone et quartier au moment 
 - **Frais de livraison** convenus après discussion (ajoutés au total à encaisser)
 - **Copie liste livreur** : génère un message WhatsApp formaté par quartier
 - Lien WhatsApp de notification client pré-rempli depuis la page de détail
+- Sélection de livraisons + livreur → **Créer une tournée**
+
+### Zones & tarifs (`/admin/livraisons/reglages`)
+
+- **Point de départ** (boutique) à placer une fois sur la mini-carte (OpenStreetMap via Leaflet, sans clé d'API) ; c'est aussi le point de retrait affiché aux clientes, avec lien Google Maps.
+- **Quartiers de référence** pré-remplis (30 grands quartiers du Grand Conakry, positions **approximatives** : à ajuster en déplaçant les marqueurs). Chaque quartier a une **fourchette** de frais (min–max) affichée au paiement ; « Suggérer » la calcule depuis la distance à la boutique.
+- **Tarif des tournées** : prise en charge + prix/km + petit supplément par arrêt, retour inclus ou non, facteur route (vol d'oiseau → route).
+
+### Tournées (`/admin/livraisons/tournees`)
+
+Le prix payé par la cliente (frais de livraison de la commande) et ce que coûte le déplacement du livreur sont **séparés** :
+
+- Une **tournée** = un déplacement du livreur, payé **une fois** : `prise en charge + km estimés × prix/km + (arrêts − 1) × supplément`, arrondi à 500 GNF. Deux clientes voisines n'ajoutent presque rien. Ou **forfait** saisi à la main.
+- Ordre de passage conseillé (plus proche d'abord) depuis la boutique ; position = position partagée par la cliente, sinon centre du quartier choisi.
+- **Feuille de route** WhatsApp envoyée au livreur (arrêts, liens carte, montants à encaisser).
+- **Règlement** : encaissé attendu (livrée : reste à payer + frais ; échouée : frais de déplacement, sauf exemption = frais à 0) − rémunération = montant à remettre à la boutique. Une tournée réglée est figée.
+
+Calculs purs dans `lib/delivery.ts` (testés), accès base dans `lib/delivery-runs.ts`.
 
 ---
 
@@ -409,6 +427,8 @@ Dashboard admin → **Notifications de commandes → Activer** (à faire sur cha
 ---
 
 ## Chantiers ouverts
+
+- **Positions des quartiers** : coordonnées pré-remplies approximatives, à vérifier sur la carte.
 
 - **Fidélité / VIP** : les champs existent sur `Customer`, les règles (points par GNF, avantages, seuil VIP) restent à définir.
 - **Prix revendeur publics** : aujourd'hui les prix de gros sont indicatifs (paliers existants) puis négociés ; des paliers spécifiques revendeurs pourraient être ajoutés.

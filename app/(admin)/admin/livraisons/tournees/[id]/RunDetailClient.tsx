@@ -310,7 +310,11 @@ export function RunDetailClient({ run, livreur, start, stops, missingPositions, 
             <h2 className="mb-2 font-semibold">Règlement</h2>
             <Row label="Encaissé par le livreur" value={gnf(settlement.collected)} />
             <Row label="Sa rémunération" value={`− ${gnf(settlement.cost)}`} />
-            <Row label="À remettre à la boutique" value={gnf(settlement.toRemit)} strong />
+            {settlement.toRemit >= 0 ? (
+              <Row label="À remettre à la boutique" value={gnf(settlement.toRemit)} strong />
+            ) : (
+              <Row label="La boutique doit au livreur" value={gnf(-settlement.toRemit)} strong />
+            )}
             <p className="pt-2 text-xs text-[var(--color-muted)]">
               Frais de livraison payés par les clientes : {gnf(settlement.clientFees)} · solde livraison :{" "}
               <span className={settlement.deliveryBalance < 0 ? "text-red-600" : "text-green-700"}>

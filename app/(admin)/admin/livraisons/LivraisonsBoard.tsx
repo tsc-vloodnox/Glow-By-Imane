@@ -417,9 +417,9 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
         </div>
       )}
 
-      {/* Barre d'attribution flottante */}
+      {/* Barre d'attribution flottante, au-dessus de la navigation mobile (z-50) qu'elle remplace le temps de la sélection */}
       {selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-border)] bg-white p-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
+        <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-[var(--color-border)] bg-white p-3 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
             <span className="text-sm font-medium">
               {selected.size} commande{selected.size > 1 ? "s" : ""} sélectionnée{selected.size > 1 ? "s" : ""}
