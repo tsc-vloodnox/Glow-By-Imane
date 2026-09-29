@@ -22,6 +22,8 @@ type Props = {
   /** Tracé de l'itinéraire (tournée) */
   route?: { lat: number; lng: number }[];
   onMove?: (id: string, lat: number, lng: number) => void;
+  /** Clic sur un point (ex : ouvrir la fiche du quartier) */
+  onPointClick?: (id: string) => void;
   /** Clic sur la carte (ex : placer la boutique) */
   onMapClick?: (lat: number, lng: number) => void;
   className?: string;
@@ -36,16 +38,16 @@ const STYLES: Record<MapPoint["kind"], string> = {
 };
 
 /** Mini-carte OpenStreetMap (Leaflet, sans clé d'API). Chargée côté navigateur uniquement. */
-export function DeliveryMap({ points, route, onMove, onMapClick, className }: Props) {
+export function DeliveryMap({ points, route, onMove, onPointClick, onMapClick, className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const layerRef = useRef<import("leaflet").LayerGroup | null>(null);
-  const callbacks = useRef({ onMove, onMapClick });
+  const callbacks = useRef({ onMove, onPointClick, onMapClick });
   const fitted = useRef(false);
 
   useEffect(() => {
-    callbacks.current = { onMove, onMapClick };
-  }, [onMove, onMapClick]);
+    callbacks.current = { onMove, onPointClick, onMapClick };
+  }, [onMove, onPointClick, onMapClick]);
 
   // Création de la carte (une seule fois)
   useEffect(() => {
@@ -94,6 +96,7 @@ export function DeliveryMap({ points, route, onMove, onMapClick, className }: Pr
           const marker = L.marker([point.lat, point.lng], { icon, draggable: Boolean(point.draggable) })
             .bindTooltip(point.label, { direction: "top", offset: [0, -8] })
             .addTo(layer);
+          marker.on("click", () => callbacks.current.onPointClick?.(point.id));
           if (point.draggable) {
             marker.on("dragend", () => {
               const { lat, lng } = marker.getLatLng();

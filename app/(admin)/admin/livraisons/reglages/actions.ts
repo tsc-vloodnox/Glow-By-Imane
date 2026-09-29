@@ -49,12 +49,65 @@ async function movePickupPointImpl(id: string, lat: number, lng: number) {
   revalidateDelivery();
 }
 
-async function updateQuartierImpl(id: string, input: { feeMin: unknown; feeMax: unknown; active: boolean }) {
+const CONAKRY = { lat: 9.585, lng: -13.64 };
+
+function quartierText(value: unknown, label: string): string {
+  const text = String(value ?? "").trim().replace(/\s+/g, " ");
+  if (!text) throw new UserError(`${label} requis.`);
+  if (text.length > 60) throw new UserError(`${label} : 60 caractères maximum.`);
+  return text;
+}
+
+/** Nom de quartier déjà pris (contrainte unique) → message lisible */
+function isUniqueViolation(err: unknown) {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "P2002";
+}
+
+/**
+ * Crée (id null) ou modifie un quartier : nom, commune, fourchette, actif, position.
+ * Position vide à la création : centre des quartiers de la même commune (à ajuster sur la carte).
+ */
+async function saveQuartierImpl(id: string | null, formData: FormData) {
   await requireAdmin();
-  await prisma.quartier.update({
-    where: { id },
-    data: { ...toFeeRange(input.feeMin, input.feeMax), active: input.active === true },
-  });
+  const name = quartierText(formData.get("name"), "Nom du quartier");
+  const commune = quartierText(formData.get("commune"), "Commune");
+  const fees = toFeeRange(formData.get("feeMin"), formData.get("feeMax"));
+  const active = formData.get("active") === "on";
+  const blank = (key: string) => String(formData.get(key) ?? "").trim() === "";
+  let position = blank("lat") && blank("lng") ? null : toCoordinates(formData.get("lat"), formData.get("lng"));
+
+  try {
+    if (id) {
+      await prisma.quartier.update({ where: { id }, data: { name, commune, ...fees, active, ...(position ?? {}) } });
+    } else {
+      if (!position) {
+        const same = await prisma.quartier.aggregate({ where: { commune }, _avg: { lat: true, lng: true } });
+        position =
+          same._avg.lat != null && same._avg.lng != null
+            ? { lat: Math.round(same._avg.lat * 1e5) / 1e5, lng: Math.round(same._avg.lng * 1e5) / 1e5 }
+            : CONAKRY;
+      }
+      const last = await prisma.quartier.aggregate({ _max: { position: true } });
+      await prisma.quartier.create({
+        data: { name, commune, ...fees, active, ...position, position: (last._max.position ?? 0) + 1 },
+      });
+    }
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new UserError(`Le quartier « ${name} » existe déjà.`);
+    throw err;
+  }
+  revalidateDelivery();
+}
+
+/** Supprime un quartier jamais utilisé ; sinon il faut le désactiver (l'historique des commandes y fait référence). */
+async function deleteQuartierImpl(id: string) {
+  await requireAdmin();
+  const quartier = await prisma.quartier.findUnique({ where: { id }, select: { name: true, _count: { select: { orders: true } } } });
+  if (!quartier) return;
+  if (quartier._count.orders > 0) {
+    throw new UserError(`« ${quartier.name} » est utilisé par ${quartier._count.orders} commande(s) : désactivez-le plutôt.`);
+  }
+  await prisma.quartier.delete({ where: { id } });
   revalidateDelivery();
 }
 
@@ -64,17 +117,26 @@ async function moveQuartierImpl(id: string, lat: number, lng: number) {
   revalidateDelivery();
 }
 
-async function createQuartierImpl(input: { name: unknown; commune: unknown; lat: unknown; lng: unknown }) {
+/** Applique une même fourchette à tous les quartiers d'une commune (ou seulement à ceux qui n'en ont pas). */
+async function setCommuneFeesImpl(commune: string, formData: FormData) {
   await requireAdmin();
-  const name = String(input.name ?? "").trim();
-  const commune = String(input.commune ?? "").trim();
-  if (!name || !commune || name.length > 60 || commune.length > 60) throw new UserError("Nom et commune requis (60 caractères max).");
-  const last = await prisma.quartier.aggregate({ _max: { position: true } });
-  const created = await prisma.quartier.create({
-    data: { name, commune, ...toCoordinates(input.lat, input.lng), position: (last._max.position ?? 0) + 1 },
+  const fees = toFeeRange(formData.get("feeMin"), formData.get("feeMax"));
+  if (fees.feeMin == null) throw new UserError("Indiquez au moins un montant.");
+  const onlyEmpty = formData.get("onlyEmpty") === "on";
+  const { count } = await prisma.quartier.updateMany({
+    where: { commune, ...(onlyEmpty ? { feeMin: null, feeMax: null } : {}) },
+    data: fees,
   });
   revalidateDelivery();
-  return created;
+  return count;
+}
+
+async function renameCommuneImpl(from: string, to: string) {
+  await requireAdmin();
+  const name = quartierText(to, "Commune");
+  const { count } = await prisma.quartier.updateMany({ where: { commune: from }, data: { commune: name } });
+  revalidateDelivery();
+  return count;
 }
 
 /** Propose une fourchette selon la distance à la boutique (quartiers sans fourchette, ou tous). */
@@ -118,8 +180,10 @@ async function updateDeliverySettingsImpl(formData: FormData) {
 
 export const updatePickupPoint = withActionResult(updatePickupPointImpl);
 export const movePickupPoint = withActionResult(movePickupPointImpl);
-export const updateQuartier = withActionResult(updateQuartierImpl);
+export const saveQuartier = withActionResult(saveQuartierImpl);
+export const deleteQuartier = withActionResult(deleteQuartierImpl);
 export const moveQuartier = withActionResult(moveQuartierImpl);
-export const createQuartier = withActionResult(createQuartierImpl);
+export const setCommuneFees = withActionResult(setCommuneFeesImpl);
+export const renameCommune = withActionResult(renameCommuneImpl);
 export const suggestQuartierFees = withActionResult(suggestQuartierFeesImpl);
 export const updateDeliverySettings = withActionResult(updateDeliverySettingsImpl);

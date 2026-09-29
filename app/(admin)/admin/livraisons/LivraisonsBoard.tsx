@@ -405,7 +405,7 @@ export function LivraisonsBoard({ deliveries, livreurs, toPlan }: Props) {
                             const time = delivery.scheduledAt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
                             return (
-                              <li key={delivery.id} className="flex items-start gap-3 px-4 py-3">
+                              <li key={delivery.id} className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
                                 <input
                                   type="checkbox"
                                   checked={selected.has(delivery.id)}
@@ -429,10 +429,10 @@ export function LivraisonsBoard({ deliveries, livreurs, toPlan }: Props) {
                                   {delivery.order.address !== zone && (
                                     <p className="truncate text-xs text-[var(--color-muted)]">{delivery.order.address}</p>
                                   )}
-                                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--color-muted)]">
+                                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-muted)]">
                                     <span>À encaisser : {gnf(toCollect(delivery))}</span>
                                     <label className="flex items-center gap-1">
-                                      · Frais
+                                      Frais
                                       <input
                                         type="number"
                                         min="0"
@@ -445,20 +445,20 @@ export function LivraisonsBoard({ deliveries, livreurs, toPlan }: Props) {
                                       />
                                     </label>
                                     {delivery.livreur ? (
-                                      <span>· 🛵 {delivery.livreur.name}</span>
+                                      <span>🛵 {delivery.livreur.name}</span>
                                     ) : (
-                                      <span className="font-medium text-amber-600">· Sans livreur</span>
+                                      <span className="font-medium text-amber-600">Sans livreur</span>
                                     )}
                                     {delivery.runId && (
                                       <Link href={`/admin/livraisons/tournees/${delivery.runId}`} className="text-indigo-600 hover:underline">
-                                        · 🗺 Tournée{delivery.runSettled ? " réglée" : ""}
+                                        🗺 Tournée{delivery.runSettled ? " réglée" : ""}
                                       </Link>
                                     )}
-                                    {delivery.notes && <span className="break-words">· {delivery.notes}</span>}
+                                    {delivery.notes && <span className="break-words">📝 {delivery.notes}</span>}
                                   </div>
                                 </div>
 
-                                <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+                                <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
                                   <a
                                     href={buildWhatsAppUrl(delivery.order.phone)}
                                     target="_blank"

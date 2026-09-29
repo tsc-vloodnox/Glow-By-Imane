@@ -303,11 +303,15 @@ Aucun compte requis. Le client renseigne nom, téléphone et choisit **Livraison
 - **Frais de livraison** convenus après discussion (ajoutés au total à encaisser)
 - **Copie liste livreur** : génère un message WhatsApp formaté par quartier
 - Lien WhatsApp de notification client pré-rempli depuis la page de détail
-- Sélection de livraisons + livreur → **Créer une tournée**
+- **À planifier** : commandes à livrer sans date ; sélection → date + livreur (facultatif) → planifiées d'un coup, frais = bas de la fourchette annoncée
+- Regroupement par **quartier de référence** (les précisions d'adresse restent affichées)
+- Sélection de livraisons + livreur → **Assigner** ou **Créer une tournée**
+- Fiche commande : livreur choisi dans la liste, livraison modifiable (date, livreur, frais, note) ; changer de livreur retire la livraison de sa tournée ; une tournée réglée est figée
 
 ### Zones & tarifs (`/admin/livraisons/reglages`)
 
 - **Point de départ** (boutique) à placer une fois sur la mini-carte (OpenStreetMap via Leaflet, sans clé d'API) ; c'est aussi le point de retrait affiché aux clientes, avec lien Google Maps.
+- **Quartiers (CRUD)** : ajouter, modifier (nom, commune, fourchette, position, actif), supprimer s'il n'a jamais servi (sinon désactiver) ; recherche, filtre par commune ; **tarif de la commune** appliqué à tous ses quartiers ; renommer une commune ; toucher un point de la carte ouvre sa fiche.
 - **Quartiers de référence** pré-remplis (30 grands quartiers du Grand Conakry, positions **approximatives** : à ajuster en déplaçant les marqueurs). Chaque quartier a une **fourchette** de frais (min–max) affichée au paiement ; « Suggérer » la calcule depuis la distance à la boutique.
 - **Tarif des tournées** : prise en charge + prix/km + petit supplément par arrêt, retour inclus ou non, facteur route (vol d'oiseau → route).
 
