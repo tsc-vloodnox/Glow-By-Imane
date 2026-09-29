@@ -385,12 +385,12 @@ Intégré via `next/script` dans `app/MetaPixel.tsx` (actif seulement si `NEXT_P
 
 ## Commandes en gros (revendeurs)
 
-Page publique **`/revendeur`** (lien en bas de l'accueil) : le revendeur choisit librement ses quantités, **sans limite de stock**, à partir de `WHOLESALE_MIN_TOTAL_QUANTITY` unités au total (10, dans `lib/wholesale.ts`). Le prix affiché est **indicatif** (paliers et promotions actuels) ; la demande est enregistrée puis le revendeur est redirigé vers WhatsApp (« Demande revendeur #N »). Aucun paiement en ligne.
+Page publique **`/revendeur`** (lien en bas de l'accueil) : le revendeur choisit librement ses quantités, **sans limite de stock**, à partir de `WHOLESALE_MIN_TOTAL_QUANTITY` unités au total (10, dans `lib/wholesale.ts`). Le prix affiché est **indicatif** (paliers et promotions actuels) ; le revendeur peut proposer **son prix souhaité par produit** (facultatif). La demande est enregistrée puis le revendeur est redirigé vers WhatsApp (« Demande revendeur #N », avec ses prix souhaités et le total correspondant). Aucun paiement en ligne.
 
 | Étape | Stock | Côté admin |
 |---|---|---|
 | Demande reçue (`NOUVELLE`) | Aucun impact | Filtre « En gros » dans Commandes, notification |
-| Négociation | Aucun impact | Prix unitaires (et quantités) modifiables par ligne |
+| Négociation | Aucun impact | Prix unitaires (et quantités) modifiables par ligne ; prix souhaité du revendeur et écart affichés, bouton « Accepter les prix souhaités » |
 | Accord (`CONFIRMEE`) | **Réservé**, même au-delà du disponible | Quantités figées, prix encore modifiables |
 | Acompte | — | Montant, date, note ; reste à encaisser calculé |
 | Annulation | Rendu | — |

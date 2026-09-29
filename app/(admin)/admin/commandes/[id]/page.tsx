@@ -53,12 +53,12 @@ export default async function OrderDetailPage({ params }: Props) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link href="/admin/commandes" className="text-sm text-[var(--color-muted)] hover:text-[var(--color-accent)]">
             ← Commandes
           </Link>
-          <div className="mt-1 flex items-center gap-3">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-2xl font-semibold">Commande #{order.number}</h1>
             {isWholesale && (
               <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">En gros</span>
@@ -83,7 +83,8 @@ export default async function OrderDetailPage({ params }: Props) {
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Colonne principale */}
-        <div className="space-y-4 lg:col-span-2">
+        {/* min-w-0 : une colonne de grille ne doit pas s'élargir au-delà de l'écran */}
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           {/* Articles + totaux */}
           <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
             <h2 className="mb-3 font-medium">{isWholesale ? "Articles & prix négociés" : "Articles & total"}</h2>
@@ -96,6 +97,7 @@ export default async function OrderDetailPage({ params }: Props) {
                   label: orderItemLabel(item),
                   quantity: item.quantity,
                   unitPrice: item.unitPrice,
+                  requestedUnitPrice: item.requestedUnitPrice,
                 }))}
                 quantitiesLocked={order.stockReserved}
                 readOnly={order.status === "LIVREE" || order.status === "ANNULEE"}
@@ -196,7 +198,7 @@ export default async function OrderDetailPage({ params }: Props) {
         </div>
 
         {/* Colonne client */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           {isWholesale && (
             <DepositPanel
               orderId={order.id}
@@ -258,7 +260,7 @@ export default async function OrderDetailPage({ params }: Props) {
                 )}
               </div>
               <p className="mt-1 text-sm text-[var(--color-muted)]">
-                {customerOrderCount} commande{customerOrderCount > 1 ? "s" : ""} au total · voir l&apos;historique →
+                {`${customerOrderCount} commande${customerOrderCount > 1 ? "s" : ""} au total · voir l'historique →`}
               </p>
             </Link>
           )}

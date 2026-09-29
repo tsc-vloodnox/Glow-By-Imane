@@ -70,6 +70,8 @@ const formatGNF = (value: number) => `${value.toLocaleString("fr-GN")} GNF`;
 export function WholesaleRequestClient({ products, minQuantity }: { products: WholesaleProduct[]; minQuantity: number }) {
   const lines = useMemo(() => toLines(products), [products]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  // Prix unitaire souhaité par le revendeur (facultatif), par ligne
+  const [requested, setRequested] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -84,9 +86,25 @@ export function WholesaleRequestClient({ products, minQuantity }: { products: Wh
       return next;
     });
 
+  const setRequestedPrice = (key: string, value: string) =>
+    setRequested((prev) => {
+      const next = { ...prev };
+      const n = Math.floor(Number(value.replace(/\s/g, "")));
+      if (Number.isFinite(n) && n > 0) next[key] = Math.min(n, 100_000_000);
+      else delete next[key];
+      return next;
+    });
+
   const selected = lines.filter((line) => quantities[line.key]);
   const totalQuantity = selected.reduce((sum, line) => sum + quantities[line.key], 0);
   const indicativeTotal = selected.reduce((sum, line) => sum + line.lineTotal(quantities[line.key]), 0);
+  // Total selon les prix souhaités (prix indicatif pour les lignes sans proposition)
+  const hasRequested = selected.some((line) => requested[line.key]);
+  const requestedTotal = selected.reduce(
+    (sum, line) =>
+      sum + (requested[line.key] ? requested[line.key] * quantities[line.key] : line.lineTotal(quantities[line.key])),
+    0,
+  );
   const missing = Math.max(minQuantity - totalQuantity, 0);
 
   const query = search.trim().toLowerCase();
@@ -123,6 +141,7 @@ export function WholesaleRequestClient({ products, minQuantity }: { products: Wh
           productId: line.productId,
           productSizeId: line.productSizeId,
           quantity: quantities[line.key],
+          requestedUnitPrice: requested[line.key] ?? null,
         })),
       });
       window.location.assign(whatsappUrl);
@@ -141,7 +160,7 @@ export function WholesaleRequestClient({ products, minQuantity }: { products: Wh
         <h1 className="mt-2 font-serif text-3xl text-[var(--color-accent)]">Espace revendeurs</h1>
         <ul className="mt-3 space-y-1 text-sm text-[var(--color-muted)]">
           <li>• À partir de {minQuantity} unités, tous produits confondus.</li>
-          <li>• Prix indicatifs dégressifs : le tarif final se fixe ensemble sur WhatsApp.</li>
+          <li>• Prix indicatifs dégressifs : proposez votre prix par produit si vous le souhaitez, le tarif final se fixe ensemble sur WhatsApp.</li>
           <li>• Quantités libres, même au-delà du stock : nous confirmons la disponibilité et les délais.</li>
           <li>• Aucun paiement en ligne : acompte éventuel à convenir directement.</li>
         </ul>
@@ -173,32 +192,48 @@ export function WholesaleRequestClient({ products, minQuantity }: { products: Wh
                   const quantity = quantities[line.key] ?? 0;
                   const unitHint = Math.round(line.lineTotal(Math.max(quantity, minQuantity)) / Math.max(quantity, minQuantity));
                   return (
-                    <li key={line.key} className={`flex items-center gap-3 rounded-2xl border bg-white p-2.5 ${
+                    <li key={line.key} className={`rounded-2xl border bg-white p-2.5 ${
                       quantity ? "border-[var(--color-accent)]" : "border-[var(--color-border)]"
                     }`}>
-                      <ProductImage imageName={line.image} alt={line.label} className="h-14 w-14 shrink-0 rounded-xl" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{line.label}</p>
-                        <p className="text-xs text-[var(--color-muted)]">
-                          {quantity ? `${formatGNF(line.lineTotal(quantity))} indicatif` : `≈ ${formatGNF(unitHint)} / unité`}
-                        </p>
+                      <div className="flex items-center gap-3">
+                        <ProductImage imageName={line.image} alt={line.label} className="h-14 w-14 shrink-0 rounded-xl" />
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 text-sm font-medium">{line.label}</p>
+                          <p className="text-xs text-[var(--color-muted)]">
+                            {quantity ? `${formatGNF(line.lineTotal(quantity))} indicatif` : `≈ ${formatGNF(unitHint)} / unité`}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button type="button" aria-label={`Retirer une unité de ${line.label}`}
+                            onClick={() => setQuantity(line.key, quantity - 1)} disabled={!quantity}
+                            className="h-8 w-8 rounded-full text-lg text-[var(--color-accent)] disabled:opacity-30">−</button>
+                          <input
+                            type="number" inputMode="numeric" min={0} max={10000}
+                            aria-label={`Quantité de ${line.label}`}
+                            value={quantity || ""}
+                            placeholder="0"
+                            onChange={(e) => setQuantity(line.key, Number(e.target.value))}
+                            className="w-14 rounded-lg border border-[var(--color-border)] px-1 py-1 text-center text-sm"
+                          />
+                          <button type="button" aria-label={`Ajouter une unité de ${line.label}`}
+                            onClick={() => setQuantity(line.key, quantity + 1)}
+                            className="h-8 w-8 rounded-full text-lg text-[var(--color-accent)]">+</button>
+                        </div>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button type="button" aria-label={`Retirer une unité de ${line.label}`}
-                          onClick={() => setQuantity(line.key, quantity - 1)} disabled={!quantity}
-                          className="h-8 w-8 rounded-full text-lg text-[var(--color-accent)] disabled:opacity-30">−</button>
-                        <input
-                          type="number" inputMode="numeric" min={0} max={10000}
-                          aria-label={`Quantité de ${line.label}`}
-                          value={quantity || ""}
-                          placeholder="0"
-                          onChange={(e) => setQuantity(line.key, Number(e.target.value))}
-                          className="w-14 rounded-lg border border-[var(--color-border)] px-1 py-1 text-center text-sm"
-                        />
-                        <button type="button" aria-label={`Ajouter une unité de ${line.label}`}
-                          onClick={() => setQuantity(line.key, quantity + 1)}
-                          className="h-8 w-8 rounded-full text-lg text-[var(--color-accent)]">+</button>
-                      </div>
+                      {quantity ? (
+                        <label className="mt-2 flex items-center justify-end gap-2 text-xs text-[var(--color-muted)]">
+                          Prix souhaité / unité (facultatif)
+                          <input
+                            type="number" inputMode="numeric" min={1}
+                            aria-label={`Prix souhaité par unité pour ${line.label}`}
+                            value={requested[line.key] || ""}
+                            placeholder={String(Math.round(line.lineTotal(quantity) / quantity))}
+                            onChange={(e) => setRequestedPrice(line.key, e.target.value)}
+                            className="w-24 rounded-lg border border-[var(--color-border)] px-2 py-1 text-right text-sm text-[var(--foreground)]"
+                          />
+                          <span>GNF</span>
+                        </label>
+                      ) : null}
                     </li>
                   );
                 })}
@@ -234,7 +269,11 @@ export function WholesaleRequestClient({ products, minQuantity }: { products: Wh
               {totalQuantity} unité{totalQuantity > 1 ? "s" : ""} · ≈ {formatGNF(indicativeTotal)}
             </p>
             <p className="text-xs text-[var(--color-muted)]">
-              {missing > 0 ? `Encore ${missing} unité${missing > 1 ? "s" : ""} pour une commande en gros` : "Prix indicatif, à confirmer sur WhatsApp"}
+              {missing > 0
+                ? `Encore ${missing} unité${missing > 1 ? "s" : ""} pour une commande en gros`
+                : hasRequested
+                  ? `Selon vos prix : ${formatGNF(requestedTotal)}`
+                  : "Prix indicatif, à confirmer sur WhatsApp"}
             </p>
           </div>
           <button type="submit" form="demande" disabled={missing > 0 || isSubmitting}

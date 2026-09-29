@@ -242,6 +242,9 @@ model OrderItem {
   quantity  Int
   unitPrice Int
 
+  /// Commandes en gros : prix unitaire proposé par le revendeur dans sa demande (facultatif)
+  requestedUnitPrice Int?
+
   /// Kit : contenu exact au moment de la commande (le kit peut être modifié ensuite)
   components OrderItemComponent[]
 
