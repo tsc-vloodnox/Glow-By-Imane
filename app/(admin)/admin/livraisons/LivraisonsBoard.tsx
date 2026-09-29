@@ -196,16 +196,24 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">Livraisons</h1>
           <p className="text-sm text-[var(--color-muted)]">
             {pendingCount} en attente · vue des 7 prochains jours
           </p>
         </div>
-        <Link href="/admin/livreurs" className="text-sm text-[var(--color-accent)]">
-          Gérer les livreurs →
-        </Link>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <Link href="/admin/livraisons/tournees" className="text-[var(--color-accent)]">
+            Tournées →
+          </Link>
+          <Link href="/admin/livraisons/reglages" className="text-[var(--color-accent)]">
+            Zones & tarifs →
+          </Link>
+          <Link href="/admin/livreurs" className="text-[var(--color-accent)]">
+            Livreurs →
+          </Link>
+        </div>
       </div>
 
       {error && (
