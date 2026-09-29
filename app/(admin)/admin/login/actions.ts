@@ -39,12 +39,12 @@ export async function loginAction(
 
   // Anti brute-force : au-delà de N échecs par IP, connexion bloquée un moment
   const rateLimitKey = `admin-login:${await getClientIp()}`;
-  if (isRateLimited(rateLimitKey, MAX_FAILED_ATTEMPTS, LOCKOUT_WINDOW_MS)) {
+  if (await isRateLimited(rateLimitKey, MAX_FAILED_ATTEMPTS, LOCKOUT_WINDOW_MS)) {
     return { error: "Trop de tentatives échouées. Réessayez dans 15 minutes." };
   }
 
   if (!(await isAdminCredentialsValid(phone, password))) {
-    recordRateLimitHit(rateLimitKey, LOCKOUT_WINDOW_MS);
+    await recordRateLimitHit(rateLimitKey, MAX_FAILED_ATTEMPTS, LOCKOUT_WINDOW_MS);
     // Délai volontaire pour ralentir le brute-force
     await new Promise((r) => setTimeout(r, 500));
     return { error: "Identifiants incorrects." };

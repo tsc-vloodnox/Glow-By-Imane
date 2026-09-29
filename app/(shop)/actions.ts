@@ -33,7 +33,7 @@ async function createOrderImpl(rawData: OrderInput) {
   // Les server actions sont appelables avec n'importe quel payload : on revalide tout.
   const data = parseOrderInput(rawData);
 
-  if (!checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS)) {
+  if (!(await checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS))) {
     throw new UserError(TOO_MANY_ORDERS);
   }
 

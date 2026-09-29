@@ -14,7 +14,7 @@ const GIFT_UPLOAD_WINDOW_MS = 15 * 60 * 1000;
  * "gifts/" pour les isoler du catalogue, et limitées en fréquence par IP.
  */
 async function uploadGiftPhotoImpl(file: File) {
-  if (!checkRateLimit(`gift-upload:${await getClientIp()}`, GIFT_UPLOAD_LIMIT_PER_IP, GIFT_UPLOAD_WINDOW_MS)) {
+  if (!(await checkRateLimit(`gift-upload:${await getClientIp()}`, GIFT_UPLOAD_LIMIT_PER_IP, GIFT_UPLOAD_WINDOW_MS))) {
     throw new UserError("Trop d'envois de photos. Merci de patienter quelques minutes.");
   }
 
