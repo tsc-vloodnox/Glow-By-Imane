@@ -31,6 +31,15 @@ function detectState(): State | null {
   return null;
 }
 
+/** Erreur navigateur → message compréhensible */
+function describeError(error: unknown): string {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "NotAllowedError" || name === "AbortError") {
+    return "Le navigateur a refusé l'abonnement (navigation privée, ou service de notifications indisponible sur cet appareil).";
+  }
+  return error instanceof Error && /[àéèç]/.test(error.message) ? error.message : "Activation impossible sur cet appareil.";
+}
+
 async function saveSubscription(method: "POST" | "DELETE", body: unknown) {
   const response = await fetch("/api/webhooks/push", {
     method,
@@ -66,6 +75,7 @@ export function PushNotificationsToggle() {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
         setState(permission === "denied" ? "denied" : "off");
+        if (permission !== "denied") setMessage("Autorisation non accordée : touchez « Autoriser » quand le navigateur le demande.");
         return;
       }
       const registration = await navigator.serviceWorker.register("/sw.js");
@@ -79,7 +89,7 @@ export function PushNotificationsToggle() {
       await saveSubscription("POST", subscription.toJSON());
       setState("on");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Activation impossible.");
+      setMessage(describeError(error));
     } finally {
       setBusy(false);
     }

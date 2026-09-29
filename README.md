@@ -16,7 +16,8 @@ Application e-commerce de beauté et accessoires ciblant le marché guinéen, av
 | Auth admin | Cookie HMAC-SHA256 signé (sans Supabase Auth) |
 | Stockage images | Supabase Storage (bucket `catalogue`) |
 | Styles | Tailwind CSS + variables CSS custom + shadcn/ui |
-| Notifications | Web Push (VAPID) — ⚠️ **à terminer** (voir plus bas) |
+| Notifications | Web Push (VAPID) + service worker (`public/sw.js`) |
+| Anti-spam | Upstash Redis (`@upstash/ratelimit`), repli en mémoire |
 | Tests | Vitest (`pnpm test`) |
 | Déploiement | Vercel (domaine : glowbyimane.com) |
 
@@ -48,7 +49,13 @@ WHATSAPP_VENDOR_NUMBER=224XXXXXXXXX
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
 VAPID_PRIVATE_KEY=...
 
+# Anti-spam partagé (optionnel — sinon compteur en mémoire par instance)
+# Ajoutés automatiquement par l'intégration Upstash du Marketplace Vercel
+UPSTASH_REDIS_REST_URL=...        # ou KV_REST_API_URL
+UPSTASH_REDIS_REST_TOKEN=...      # ou KV_REST_API_TOKEN
+
 # Divers (optionnels)
+VAPID_SUBJECT=mailto:admin@glowbyimane.com   # contact envoyé aux services de push
 NEXT_PUBLIC_SITE_URL=https://glowbyimane.com   # base des liens de cartes cadeau
 NEXT_PUBLIC_META_PIXEL_ID=...                  # Meta Pixel désactivé si absent
 ```
@@ -138,16 +145,21 @@ lib/
 ├── form-validation.ts            # toInt / toDate / toJsonArray (saisies admin)
 ├── image-upload.ts               # Upload Supabase Storage (vérification du format réel)
 ├── order-validation.ts           # Validation serveur des commandes boutique
-├── rate-limit.ts                 # Limiteur de débit en mémoire (anti-spam, login)
+├── rate-limit.ts                 # Limiteur de débit : Upstash si configuré, sinon mémoire (anti-spam, login)
+├── customers.ts                  # upsertCustomer() — fiche cliente rattachée à chaque commande
+├── customer-stats.ts             # Nombre de commandes, total dépensé, dernière commande
+├── wholesale.ts                  # Commandes en gros : minimum, validation des demandes revendeur
+├── restock.ts                    # Quantités à réapprovisionner (stock négatif)
+├── order-items.ts                # Libellé d'une ligne de commande (kit / produit — taille)
 ├── slug.ts                       # slugify() + slug unique des produits
-├── stock.ts                      # releaseOrderStock() — remise en stock (annulation/suppression)
+├── stock.ts                      # releaseOrderStock() / reserveOrderStock() — rendre ou réserver le stock
 ├── cart.ts                       # Logique panier localStorage (CartItem inclut stock)
 ├── gift-card.ts                  # buildDefaultGiftMessage(), giftCardUrl(), durée d'expiration du lien
 ├── images.ts                     # catalogPath() — résolution URL Supabase Storage
 ├── order-status.ts               # Config centralisée des statuts (labels, couleurs, transitions)
 ├── pricing.ts                    # Calcul des prix : remises, promotions, paliers (voir règle ci-dessous)
 ├── prisma.ts                     # Client Prisma singleton
-├── push.ts                       # Envoi notifications Web Push (admin)
+├── push.ts                       # notifyAdmins() / notifyNewOrder() — Web Push, nettoyage des abonnements expirés
 ├── whatsapp.ts                   # normalizeGuineaPhone() + buildWhatsAppUrl() — liens wa.me,
 │                                  # buildOrderMessage() — génération message de commande pré-rempli
 └── supabase/
@@ -187,13 +199,15 @@ types/types.ts                    # Types TypeScript partagés
 
 **`Kit`** — Bundle de produits avec prix fixe et support remises (`originalPrice`).
 
-**`Order`** — Commandes avec workflow de statut, support de remises (`discountAmount`, `discountReason`, `finalTotal`) et traçabilité de la source (`app` / `whatsapp` / `admin`). `stockReserved` indique que la commande a décrémenté le stock : il est restitué (une seule fois) à l'annulation ou à la suppression d'une commande non livrée.
+**`Order`** — Commandes au détail (`kind = DETAIL`) ou en gros (`kind = GROS`, voir « Commandes en gros »), avec workflow de statut, support de remises (`discountAmount`, `discountReason`, `finalTotal`) et traçabilité de la source (`app` / `whatsapp` / `admin`). `stockReserved` indique que la commande a décrémenté le stock : il est restitué (une seule fois) à l'annulation ou à la suppression d'une commande non livrée.
 
 **`Delivery`** — Entité logistique séparée de la commande. Contient la date planifiée, le statut, le livreur assigné et les frais de livraison convenus (`deliveryFee`).
 
 **`GiftCard`** — Carte cadeau optionnelle associée à une commande (créée uniquement si le client coche "Cette commande est un cadeau" au checkout). Contient les infos destinataire, un message et une photo (tous deux modifiables/validables par l'admin), un statut `DRAFT`/`PUBLISHED` et un `token` unique généré à la publication pour le lien public temporaire (`/cadeau/[token]`, expire `GIFT_LINK_EXPIRY_DAYS` après publication — 30 jours par défaut).
 
-**`Customer`** — Profil client avec points de fidélité et statut VIP. ⚠️ Pas encore alimenté par l'application.
+**`Customer`** — Fiche cliente créée ou mise à jour automatiquement à chaque commande, par numéro normalisé (`620 00 00 00`, `+224620000000` et `0620000000` = la même cliente). Boutique, statut revendeur et notes internes modifiables dans l'admin (`/admin/clientes`). Points de fidélité et VIP présents mais **règles à définir**.
+
+**`OrderItemComponent`** — Contenu exact d'un kit au moment de la commande : une annulation restitue ce qui a été vendu, même si le kit a été modifié depuis.
 
 ### Workflow commande
 
@@ -369,9 +383,32 @@ Intégré via `next/script` dans `app/MetaPixel.tsx` (actif seulement si `NEXT_P
 
 ---
 
+## Commandes en gros (revendeurs)
+
+Page publique **`/revendeur`** (lien en bas de l'accueil) : le revendeur choisit librement ses quantités, **sans limite de stock**, à partir de `WHOLESALE_MIN_TOTAL_QUANTITY` unités au total (10, dans `lib/wholesale.ts`). Le prix affiché est **indicatif** (paliers et promotions actuels) ; la demande est enregistrée puis le revendeur est redirigé vers WhatsApp (« Demande revendeur #N »). Aucun paiement en ligne.
+
+| Étape | Stock | Côté admin |
+|---|---|---|
+| Demande reçue (`NOUVELLE`) | Aucun impact | Filtre « En gros » dans Commandes, notification |
+| Négociation | Aucun impact | Prix unitaires (et quantités) modifiables par ligne |
+| Accord (`CONFIRMEE`) | **Réservé**, même au-delà du disponible | Quantités figées, prix encore modifiables |
+| Acompte | — | Montant, date, note ; reste à encaisser calculé |
+| Annulation | Rendu | — |
+
+Un **stock négatif** signifie « unités promises à réapprovisionner » : il apparaît dans le dashboard (« À réapprovisionner ») et dans le tableau des produits. Il n'est plus vendable au détail ; quand la marchandise arrive, il suffit d'ajouter le stock reçu.
+
+---
+
+## Notifications
+
+Dashboard admin → **Notifications de commandes → Activer** (à faire sur chaque appareil). Une notification part à chaque commande et chaque demande revendeur, après la réponse (aucun délai pour la cliente) ; les appareils expirés sont nettoyés automatiquement.
+
+- Nécessite `NEXT_PUBLIC_VAPID_PUBLIC_KEY` et `VAPID_PRIVATE_KEY` (sinon, simplement désactivé).
+- **iPhone** : ajouter d'abord le site à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis activer depuis l'icône.
+
+---
+
 ## Chantiers ouverts
 
-- **Notifications Web Push** : la route d'abonnement (`/api/webhooks/push`, réservée à l'admin) et l'envoi (`lib/push.ts`) existent, mais il manque le service worker (`public/sw.js`), le bouton d'activation côté admin et l'appel à `sendOrderNotification` après `createOrder`.
-- **Limitation de débit** : en mémoire, donc par instance Vercel. Pour une protection solide, brancher un store partagé (Upstash Redis / Vercel KV) ou une règle WAF Vercel.
-- **`Customer`** : modèle présent mais non alimenté (fidélité, VIP).
-- **Kits** : la composition n'est pas figée dans la commande ; une annulation restitue selon la composition actuelle du kit.
+- **Fidélité / VIP** : les champs existent sur `Customer`, les règles (points par GNF, avantages, seuil VIP) restent à définir.
+- **Prix revendeur publics** : aujourd'hui les prix de gros sont indicatifs (paliers existants) puis négociés ; des paliers spécifiques revendeurs pourraient être ajoutés.
