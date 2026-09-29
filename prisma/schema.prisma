@@ -26,6 +26,24 @@ enum OrderKind {
   GROS
 }
 
+/// LIVRAISON : livrée chez le client. RETRAIT : la cliente vient chercher sa commande au point relais.
+enum DeliveryMode {
+  LIVRAISON
+  RETRAIT
+}
+
+/// Coût d'une tournée : calculé (départ + km + arrêts) ou forfait saisi à la main.
+enum RunCostMode {
+  CALCULE
+  FORFAIT
+}
+
+enum RunStatus {
+  PLANIFIEE
+  EN_COURS
+  TERMINEE
+}
+
 enum DeliveryStatus {
   PLANIFIEE
   EN_COURS
@@ -63,11 +81,11 @@ model Product {
   category      Category    @relation(fields: [categoryId], references: [id])
   orderItems    OrderItem[]
   createdAt     DateTime    @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime    @updatedAt
 
   sizes      ProductSize[]
   packPrices ProductPackPrice[]
-  promotions  ProductPromotion[]
+  promotions ProductPromotion[]
   kitItems   KitItem[]
 
   @@index([categoryId])
@@ -80,7 +98,7 @@ model ProductSize {
   id        String  @id @default(cuid())
   productId String
   product   Product @relation(fields: [productId], references: [id])
-  label     String  // ex: "30ml", "50ml"
+  label     String // ex: "30ml", "50ml"
   price     Int
   stock     Int     @default(0)
   position  Int     @default(0)
@@ -101,22 +119,22 @@ model ProductPackPrice {
   product       Product      @relation(fields: [productId], references: [id])
   productSizeId String?
   productSize   ProductSize? @relation(fields: [productSizeId], references: [id])
-  quantity      Int          // 1, 3, 5...
-  price         Int          // prix total pour cette quantité
+  quantity      Int // 1, 3, 5...
+  price         Int // prix total pour cette quantité
   position      Int          @default(0)
 
   @@unique([productId, productSizeId, quantity])
 }
 
 model Promotion {
-  id          String    @id @default(cuid())
-  name        String                          // ex: "Soldes été 2026"
-  discountPercent Int                         // ex: 20 (pour -20%)
-  startAt     DateTime
-  endAt       DateTime
-  active      Boolean   @default(true)        // peut être désactivée manuellement
-  products    ProductPromotion[]
-  createdAt   DateTime  @default(now())
+  id              String             @id @default(cuid())
+  name            String // ex: "Soldes été 2026"
+  discountPercent Int // ex: 20 (pour -20%)
+  startAt         DateTime
+  endAt           DateTime
+  active          Boolean            @default(true) // peut être désactivée manuellement
+  products        ProductPromotion[]
+  createdAt       DateTime           @default(now())
 }
 
 // Table de jointure — une promo peut couvrir plusieurs produits,
@@ -131,12 +149,13 @@ model ProductPromotion {
   @@unique([promotionId, productId])
   @@index([productId])
 }
+
 /// Kit / bundle de produits (ex: "kit soin visage complet").
 model Kit {
   id            String      @id @default(cuid())
   name          String
   description   String?
-  price         Int         // prix fixe du kit
+  price         Int // prix fixe du kit
   originalPrice Int?
   images        String[]
   archived      Boolean     @default(false)
@@ -194,6 +213,19 @@ model Order {
 
   /// Nom de la boutique (commandes en gros)
   businessName String?
+
+  /// Livraison ou retrait au point relais
+  deliveryMode   DeliveryMode @default(LIVRAISON)
+  quartierId     String?
+  quartierRef    Quartier?    @relation(fields: [quartierId], references: [id])
+  pickupPointId  String?
+  pickupPoint    PickupPoint? @relation(fields: [pickupPointId], references: [id])
+  /// Fourchette de frais annoncée à la cliente au moment de la commande (figée)
+  deliveryFeeMin Int?
+  deliveryFeeMax Int?
+  /// Position partagée volontairement par la cliente (facultatif)
+  locationLat    Float?
+  locationLng    Float?
 
   estimatedTotal Int
 
@@ -285,7 +317,8 @@ model Livreur {
   notes  String?
 
   deliveries Delivery[]
-  createdAt  DateTime   @default(now())
+  runs       DeliveryRun[]
+  createdAt  DateTime      @default(now())
 }
 
 model Delivery {
@@ -299,6 +332,11 @@ model Delivery {
   livreurId String?
   livreur   Livreur? @relation(fields: [livreurId], references: [id])
 
+  /// Tournée du livreur dans laquelle cette livraison est prévue
+  runId String?
+  run   DeliveryRun? @relation(fields: [runId], references: [id])
+
+  /// Frais payés par le client (dus même en cas de retour/annulation sur place, sauf exemption)
   deliveryFee Int      @default(0)
   notes       String?
   createdAt   DateTime @default(now())
@@ -306,6 +344,76 @@ model Delivery {
 
   @@index([livreurId])
   @@index([scheduledAt])
+  @@index([runId])
+}
+
+/// Point de départ des livraisons : la boutique aujourd'hui, d'autres points relais demain.
+model PickupPoint {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  lat       Float?
+  lng       Float?
+  isDefault Boolean  @default(false)
+  active    Boolean  @default(true)
+  orders    Order[]
+  createdAt DateTime @default(now())
+}
+
+/// Grand quartier de référence : position (approximative, ajustable sur la carte admin)
+/// et fourchette de frais de livraison annoncée à la cliente.
+model Quartier {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  commune  String
+  lat      Float
+  lng      Float
+  feeMin   Int?
+  feeMax   Int?
+  active   Boolean @default(true)
+  position Int     @default(0)
+  orders   Order[]
+}
+
+/// Réglages du calcul du coût des tournées (une seule ligne, id "default").
+model DeliverySettings {
+  id            String   @id @default("default")
+  /// Prise en charge d'une tournée (le déplacement lui-même)
+  baseFee       Int      @default(5000)
+  /// Par kilomètre estimé
+  perKm         Int      @default(1000)
+  /// Par arrêt à partir du 2e (deux clientes voisines ne coûtent presque rien de plus)
+  perExtraStop  Int      @default(1000)
+  /// Compter le retour au point de départ
+  includeReturn Boolean  @default(true)
+  /// Distance à vol d'oiseau → distance par la route
+  roadFactor    Float    @default(1.3)
+  updatedAt     DateTime @default(now()) @updatedAt
+}
+
+/// Tournée : un livreur, une date, les livraisons emportées en un déplacement.
+/// Le livreur est payé à la tournée (et non plus à la course).
+model DeliveryRun {
+  id            String      @id @default(cuid())
+  livreurId     String
+  livreur       Livreur     @relation(fields: [livreurId], references: [id])
+  date          DateTime
+  status        RunStatus   @default(PLANIFIEE)
+  costMode      RunCostMode @default(CALCULE)
+  /// Estimation au moment du dernier calcul
+  estimatedKm   Float?
+  suggestedCost Int         @default(0)
+  /// Montant dû au livreur pour la tournée
+  cost          Int         @default(0)
+  /// Règlement fait : encaissements remis à la boutique, paie du livreur déduite
+  settledAt     DateTime?
+  notes         String?
+  deliveries    Delivery[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @default(now()) @updatedAt
+
+  @@index([livreurId, date])
+  @@index([settledAt])
 }
 
 /// Carte cadeau associée à une commande passée pour offrir à un tiers.
