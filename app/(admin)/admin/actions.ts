@@ -11,8 +11,13 @@ import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 import { UserError, withActionResult } from "@/lib/action-result";
 import { toDate, toInt, toJsonArray } from "@/lib/form-validation";
 import { uniqueProductSlug } from "@/lib/slug";
+import { reserveOrderStock } from "@/lib/stock";
 
 const isBlank = (value: unknown) => value === undefined || value === null || value === "";
+
+// Le stock peut être négatif : unités réservées par une commande en gros confirmée,
+// à réapprovisionner. Sans ça, un produit dans ce cas ne pourrait plus être enregistré.
+const MIN_STOCK = -1_000_000;
 
 // ─── Helpers revalidation ────────────────────────────────────────────────────
 
@@ -59,7 +64,7 @@ function parseProductFormData(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const price = toInt(formData.get("price"), "Prix");
-  const stock = toInt(formData.get("stock"), "Stock", { optional: true });
+  const stock = toInt(formData.get("stock"), "Stock", { optional: true, min: MIN_STOCK });
   const categoryId = String(formData.get("categoryId") ?? "").trim();
   const favorite = formData.get("favorite") === "on";
   const imagesField = String(formData.get("images") ?? "").trim();
@@ -74,7 +79,7 @@ function parseProductFormData(formData: FormData) {
       id: typeof s.id === "string" ? s.id : undefined,
       label: (s.label as string).trim().slice(0, 50),
       price: toInt(s.price, `Prix de la taille « ${s.label} »`),
-      stock: toInt(s.stock, `Stock de la taille « ${s.label} »`, { optional: true }),
+      stock: toInt(s.stock, `Stock de la taille « ${s.label} »`, { optional: true, min: MIN_STOCK }),
       archived: s.archived === true,
     }));
 
@@ -482,7 +487,7 @@ async function updateDeliveryStatusImpl(
 
   const current = await prisma.delivery.findUniqueOrThrow({
     where: { id: deliveryId },
-    select: { order: { select: { status: true } } },
+    select: { order: { select: { status: true, kind: true } } },
   });
   if (current.order.status === "ANNULEE") {
     throw new UserError("Cette commande est annulée : sa livraison ne peut plus changer de statut.");
@@ -504,6 +509,11 @@ async function updateDeliveryStatusImpl(
         where: { id: updated.orderId },
         data: { status: "LIVREE" },
       });
+      // Commande en gros livrée sans être passée par « Confirmée » : le stock
+      // n'avait jamais été réservé (sans effet si c'était déjà fait)
+      if (current.order.kind === "GROS") {
+        await reserveOrderStock(tx, updated.orderId);
+      }
     }
 
     return updated;

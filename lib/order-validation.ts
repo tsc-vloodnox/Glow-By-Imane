@@ -19,7 +19,7 @@ function fail(message: string): never {
   throw new UserError(message);
 }
 
-function requiredString(value: unknown, label: string, maxLength: number): string {
+export function requiredString(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") fail(`${label} invalide.`);
   const trimmed = value.trim();
   if (!trimmed) fail(`${label} requis.`);
@@ -27,7 +27,7 @@ function requiredString(value: unknown, label: string, maxLength: number): strin
   return trimmed;
 }
 
-function optionalString(value: unknown, label: string, maxLength: number): string | undefined {
+export function optionalString(value: unknown, label: string, maxLength: number): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") fail(`${label} invalide.`);
   const trimmed = value.trim();
@@ -35,14 +35,14 @@ function optionalString(value: unknown, label: string, maxLength: number): strin
   return trimmed || undefined;
 }
 
-function phone(value: unknown, label: string): string {
+export function phone(value: unknown, label: string): string {
   if (typeof value !== "string") fail(`${label} invalide.`);
   const compact = value.replace(/\s/g, "");
   if (!GUINEA_PHONE_PATTERN.test(compact)) fail(`${label} invalide (format attendu : 6XX XX XX XX).`);
   return compact;
 }
 
-function id(value: unknown): string {
+export function id(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 64) fail("Article invalide.");
   return value;
 }

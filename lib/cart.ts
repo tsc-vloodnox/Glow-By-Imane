@@ -190,5 +190,6 @@ export function getCartTotal(items: CartItem[]) {
 }
 
 function clamp(quantity: number, max: number) {
-  return Math.min(Math.max(quantity, 0), max);
+  // Le stock peut être négatif (réservé par une commande en gros) : aucune quantité disponible
+  return Math.min(Math.max(quantity, 0), Math.max(max, 0));
 }

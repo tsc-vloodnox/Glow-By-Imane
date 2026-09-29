@@ -9,9 +9,9 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
 import { GIFT_LINK_EXPIRY_DAYS, giftCardUrl } from "@/lib/gift-card";
-import { releaseOrderStock } from "@/lib/stock";
+import { releaseOrderStock, reserveOrderStock } from "@/lib/stock";
 import { upsertCustomer } from "@/lib/customers";
-import { toInt, toJsonArray } from "@/lib/form-validation";
+import { toDate, toInt, toJsonArray } from "@/lib/form-validation";
 import { UserError, withActionResult } from "@/lib/action-result";
 
 export type OrderStatusValue =
@@ -30,7 +30,7 @@ async function updateOrderStatusImpl(orderId: string, status: OrderStatusValue) 
 
   const order = await prisma.order.findUniqueOrThrow({
     where: { id: orderId },
-    select: { status: true },
+    select: { status: true, kind: true },
   });
 
   const allowedNext = ORDER_STATUS_CONFIG[order.status as OrderStatusValue]
@@ -53,11 +53,96 @@ async function updateOrderStatusImpl(orderId: string, status: OrderStatusValue) 
     if (status === "ANNULEE") {
       await releaseOrderStock(tx, orderId);
     }
+
+    // Commande en gros : l'accord (confirmation) réserve le stock, même au-delà du
+    // disponible (stock négatif = à réapprovisionner)
+    if (order.kind === "GROS" && status === "CONFIRMEE") {
+      await reserveOrderStock(tx, orderId);
+    }
   });
   revalidatePath("/admin/commandes");
   revalidatePath(`/admin/commandes/${orderId}`);
   revalidatePath("/admin/livraisons");
-  if (status === "ANNULEE") revalidatePath("/", "layout"); // stock visible en boutique
+  // Stock visible en boutique
+  if (status === "ANNULEE" || (order.kind === "GROS" && status === "CONFIRMEE")) revalidatePath("/", "layout");
+}
+
+// ─── Commandes en gros : prix négociés et acompte ────────────────────────────
+
+/**
+ * Enregistre les prix unitaires (et quantités) négociés d'une commande en gros.
+ * Les quantités ne sont modifiables que tant que le stock n'est pas réservé
+ * (avant confirmation) ; les prix restent modifiables jusqu'à la livraison.
+ */
+async function updateWholesaleLinesImpl(orderId: string, rawLines: unknown) {
+  await requireAdmin();
+
+  if (!Array.isArray(rawLines)) throw new UserError("Lignes invalides.");
+
+  const order = await prisma.order.findUniqueOrThrow({
+    where: { id: orderId },
+    select: { kind: true, status: true, stockReserved: true, discountAmount: true, items: { select: { id: true, quantity: true } } },
+  });
+  if (order.kind !== "GROS") throw new UserError("Réservé aux commandes en gros.");
+  if (order.status === "LIVREE" || order.status === "ANNULEE") {
+    throw new UserError("Commande terminée : les prix ne sont plus modifiables.");
+  }
+
+  const current = new Map(order.items.map((item) => [item.id, item]));
+  const lines = rawLines.map((raw) => {
+    const line = (raw ?? {}) as Record<string, unknown>;
+    const existing = typeof line.id === "string" ? current.get(line.id) : undefined;
+    if (!existing) throw new UserError("Ligne introuvable. Rechargez la page.");
+    const quantity = toInt(line.quantity, "Quantité", { min: 1, max: 10_000 });
+    if (order.stockReserved && quantity !== existing.quantity) {
+      throw new UserError("Stock déjà réservé : les quantités ne sont plus modifiables (annulez puis recréez la commande).");
+    }
+    return { id: existing.id, quantity, unitPrice: toInt(line.unitPrice, "Prix unitaire") };
+  });
+  if (lines.length !== current.size) throw new UserError("Toutes les lignes doivent être envoyées.");
+
+  const estimatedTotal = lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+  // La remise existante est conservée, dans la limite du nouveau total
+  const discountAmount = Math.min(order.discountAmount, estimatedTotal);
+
+  await prisma.$transaction([
+    ...lines.map((line) =>
+      prisma.orderItem.update({ where: { id: line.id }, data: { quantity: line.quantity, unitPrice: line.unitPrice } }),
+    ),
+    prisma.order.update({
+      where: { id: orderId },
+      data: { estimatedTotal, discountAmount, finalTotal: estimatedTotal - discountAmount },
+    }),
+  ]);
+
+  revalidatePath(`/admin/commandes/${orderId}`);
+  revalidatePath("/admin/commandes");
+}
+
+/** Suivi de l'acompte encaissé hors application (aucun paiement en ligne). */
+async function updateOrderDepositImpl(orderId: string, formData: FormData) {
+  await requireAdmin();
+
+  const depositAmount = toInt(formData.get("depositAmount"), "Acompte", { optional: true });
+  const paidAtRaw = String(formData.get("depositPaidAt") ?? "").trim();
+  const depositNote = String(formData.get("depositNote") ?? "").trim() || null;
+  if ((depositNote?.length ?? 0) > 500) throw new UserError("Note trop longue (500 caractères maximum).");
+
+  const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { finalTotal: true } });
+  if (depositAmount > order.finalTotal) {
+    throw new UserError("L'acompte ne peut pas dépasser le montant de la commande.");
+  }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      depositAmount,
+      depositPaidAt: depositAmount > 0 ? (paidAtRaw ? toDate(paidAtRaw, "Date de l'acompte") : new Date()) : null,
+      depositNote,
+    },
+  });
+
+  revalidatePath(`/admin/commandes/${orderId}`);
 }
 
 // ─── Remise ──────────────────────────────────────────────────────────────────
@@ -277,3 +362,5 @@ export const updateGiftCard = withActionResult(updateGiftCardImpl);
 export const updateGiftCardPhoto = withActionResult(updateGiftCardPhotoImpl);
 export const publishGiftCard = withActionResult(publishGiftCardImpl);
 export const unpublishGiftCard = withActionResult(unpublishGiftCardImpl);
+export const updateWholesaleLines = withActionResult(updateWholesaleLinesImpl);
+export const updateOrderDeposit = withActionResult(updateOrderDepositImpl);

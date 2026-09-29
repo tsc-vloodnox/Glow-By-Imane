@@ -18,6 +18,14 @@ enum OrderStatus {
   ANNULEE
 }
 
+/// DETAIL : commande boutique classique (stock réservé à la création).
+/// GROS : demande revendeur — prix négociés, stock réservé seulement à la confirmation
+/// (et pouvant devenir négatif = à réapprovisionner).
+enum OrderKind {
+  DETAIL
+  GROS
+}
+
 enum DeliveryStatus {
   PLANIFIEE
   EN_COURS
@@ -173,6 +181,7 @@ model Order {
   id     String      @id @default(cuid())
   number Int         @unique @default(autoincrement())
   status OrderStatus @default(NOUVELLE)
+  kind   OrderKind   @default(DETAIL)
   source String      @default("app")
 
   customerId String?
@@ -183,12 +192,20 @@ model Order {
   quartier String
   comment  String?
 
+  /// Nom de la boutique (commandes en gros)
+  businessName String?
+
   estimatedTotal Int
 
   discountAmount Int     @default(0)
   discountReason String?
 
   finalTotal Int @default(0)
+
+  /// Acompte encaissé hors application (espèces, mobile money…) : simple suivi interne
+  depositAmount Int       @default(0)
+  depositPaidAt DateTime?
+  depositNote   String?
 
   /// true tant que le stock des articles est réservé (décrémenté) par cette commande.
   /// Passe à false quand le stock est restitué (annulation / suppression) → jamais restitué deux fois.
@@ -203,6 +220,7 @@ model Order {
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([status, createdAt])
+  @@index([kind, createdAt])
   @@index([createdAt])
   @@index([phone, createdAt]) // anti-spam : commandes récentes par téléphone
 }

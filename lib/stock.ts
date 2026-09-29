@@ -48,3 +48,44 @@ export async function releaseOrderStock(tx: Prisma.TransactionClient, orderId: s
     }
   }
 }
+
+/**
+ * Réserve (décrémente) le stock d'une commande qui n'en réservait pas encore :
+ * commande en gros au moment de l'accord. À appeler DANS une transaction.
+ *
+ * Contrairement à une commande boutique, AUCUNE vérification de disponibilité :
+ * le stock peut devenir négatif, la valeur négative correspondant aux unités
+ * promises à réapprovisionner. Idempotent (drapeau `stockReserved` basculé
+ * atomiquement). Renvoie false si le stock était déjà réservé.
+ */
+export async function reserveOrderStock(tx: Prisma.TransactionClient, orderId: string): Promise<boolean> {
+  const claimed = await tx.order.updateMany({
+    where: { id: orderId, stockReserved: false },
+    data: { stockReserved: true },
+  });
+  if (claimed.count === 0) return false;
+
+  const items = await tx.orderItem.findMany({
+    where: { orderId },
+    include: { components: true },
+  });
+
+  const reserve = async (productId: string | null, productSizeId: string | null, quantity: number) => {
+    if (productSizeId) {
+      await tx.productSize.updateMany({ where: { id: productSizeId }, data: { stock: { decrement: quantity } } });
+    } else if (productId) {
+      await tx.product.updateMany({ where: { id: productId }, data: { stock: { decrement: quantity } } });
+    }
+  };
+
+  for (const item of items) {
+    if (item.components.length > 0) {
+      for (const component of item.components) {
+        await reserve(component.productId, component.productSizeId, component.quantity * item.quantity);
+      }
+    } else {
+      await reserve(item.productId, item.productSizeId, item.quantity);
+    }
+  }
+  return true;
+}
