@@ -8,6 +8,7 @@ import { KitsCarousel } from "./KitsCarousel";
 import { ProductCard } from "./ProductCard";
 import { ShopSearchFilterBar } from "./ShopSearchFilterBar";
 import type { KitWithItems, ProductWithPricing } from "@/types/types";
+import { InstallPrompt } from "./InstallPrompt";
 
 // Product tel que reçu côté client : createdAt est sérialisé en string par Next.js
 // à la frontière Server Component -> Client Component.
@@ -207,6 +208,8 @@ export function ShopPageClient({
             100% Satisfait
           </span>
         </div>
+
+        <InstallPrompt />
       </section>
     </main>
   );
