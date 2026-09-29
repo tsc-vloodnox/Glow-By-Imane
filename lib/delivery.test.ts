@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { formatFeeRange, haversineKm, isInGuinea, planRoute, roundUpGNF, runCost, suggestFeeRange } from "./delivery";
+import {
+  expectedCollection,
+  formatFeeRange,
+  haversineKm,
+  isInGuinea,
+  planRoute,
+  roundUpGNF,
+  runCost,
+  runSettlement,
+  suggestFeeRange,
+  type SettlementStop,
+} from "./delivery";
 
 const settings = { baseFee: 5000, perKm: 1000, perExtraStop: 1000, includeReturn: true, roadFactor: 1.3 };
 const kaloum = { lat: 9.5092, lng: -13.7122 };
@@ -81,5 +92,33 @@ describe("suggestFeeRange / formatFeeRange / roundUpGNF", () => {
   it("position plausible en Guinée", () => {
     expect(isInGuinea(kipe)).toBe(true);
     expect(isInGuinea({ lat: 48.85, lng: 2.35 })).toBe(false);
+  });
+});
+
+describe("règlement d'une tournée", () => {
+  const stop = (status: SettlementStop["status"], deliveryFee = 10_000, finalTotal = 100_000, depositAmount = 0) => ({
+    status,
+    deliveryFee,
+    finalTotal,
+    depositAmount,
+  });
+
+  it("livrée : reste à payer + frais ; échouée : frais du déplacement ; en attente : rien", () => {
+    expect(expectedCollection(stop("LIVREE", 10_000, 100_000, 30_000))).toBe(80_000);
+    expect(expectedCollection(stop("ECHOUEE"))).toBe(10_000);
+    expect(expectedCollection(stop("ECHOUEE", 0))).toBe(0); // exemptée par la boutique
+    expect(expectedCollection(stop("PLANIFIEE"))).toBe(0);
+  });
+
+  it("paie du livreur déduite de ce qu'il remet", () => {
+    const result = runSettlement([stop("LIVREE"), stop("LIVREE"), stop("ECHOUEE"), stop("REPORTEE")], 18_000);
+    expect(result).toEqual({
+      collected: 230_000,
+      clientFees: 30_000,
+      cost: 18_000,
+      toRemit: 212_000,
+      deliveryBalance: 12_000,
+      pending: 1,
+    });
   });
 });

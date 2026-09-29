@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { DELIVERY_STATUS_CONFIG, type DeliveryStatus } from "@/lib/order-status";
@@ -10,6 +11,7 @@ import {
   createLivreur as createLivreurAction,
   updateDeliveryFee as updateDeliveryFeeAction,
 } from "../actions";
+import { createRun as createRunAction } from "./tournees/actions";
 import { LivraisonStatusButton } from "./LivraisonStatusButton";
 import { QuartierCopyButton } from "./QuartierCopyButton";
 import { unwrapAction } from "@/lib/action-result";
@@ -18,6 +20,7 @@ import { unwrapAction } from "@/lib/action-result";
 const assignLivreur = unwrapAction(assignLivreurAction);
 const createLivreur = unwrapAction(createLivreurAction);
 const updateDeliveryFee = unwrapAction(updateDeliveryFeeAction);
+const createRun = unwrapAction(createRunAction);
 
 type DeliveryRow = {
   id: string;
@@ -26,6 +29,7 @@ type DeliveryRow = {
   notes: string | null;
   deliveryFee: number;
   livreurId: string | null;
+  runId: string | null;
   livreur: { id: string; name: string } | null;
   order: {
     id: string;
@@ -72,6 +76,7 @@ function groupByQuartier(deliveries: DeliveryRow[]) {
 }
 
 export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: LivraisonsBoardProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [deliveries, setDeliveries] = useState(initialDeliveries);
   const [livreurs, setLivreurs] = useState(initialLivreurs);
@@ -128,7 +133,9 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
         await assignLivreur(ids, livreurId);
         const livreur = livreurId ? livreurs.find((l) => l.id === livreurId) ?? null : null;
         setDeliveries((prev) =>
-          prev.map((d) => (ids.includes(d.id) ? { ...d, livreurId, livreur } : d)),
+          prev.map((d) =>
+            ids.includes(d.id) ? { ...d, livreurId, livreur, runId: d.livreurId === livreurId ? d.runId : null } : d,
+          ),
         );
         clearSelection();
       } catch (err) {
@@ -140,6 +147,24 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
   function handleAssignExisting() {
     if (!assignTarget) return;
     applyAssignment(assignTarget);
+  }
+
+  /** Regroupe la sélection en une tournée du livreur choisi (un déplacement payé une fois). */
+  function handleCreateRun() {
+    if (!assignTarget) {
+      setError("Choisissez le livreur de la tournée.");
+      return;
+    }
+    const ids = [...selected];
+    setError(null);
+    startTransition(async () => {
+      try {
+        const run = await createRun(ids, assignTarget);
+        router.push(`/admin/livraisons/tournees/${run.id}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erreur lors de la création de la tournée.");
+      }
+    });
   }
 
   function handleUnassign() {
@@ -166,7 +191,7 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
         setLivreurs((prev) => [...prev, { id: livreur.id, name: livreur.name }]);
         await assignLivreur(ids, livreur.id);
         setDeliveries((prev) =>
-          prev.map((d) => (ids.includes(d.id) ? { ...d, livreurId: livreur.id, livreur: { id: livreur.id, name: livreur.name } } : d)),
+          prev.map((d) => (ids.includes(d.id) ? { ...d, livreurId: livreur.id, livreur: { id: livreur.id, name: livreur.name }, runId: null } : d)),
         );
         setNewLivreurName("");
         setNewLivreurPhone("");
@@ -345,6 +370,11 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
                                     ) : (
                                       <span className="text-amber-600">· Non attribué</span>
                                     )}
+                                    {delivery.runId && (
+                                      <Link href={`/admin/livraisons/tournees/${delivery.runId}`} className="text-indigo-600 hover:underline">
+                                        · 🗺 Tournée
+                                      </Link>
+                                    )}
                                     {delivery.notes && <span>· {delivery.notes}</span>}
                                   </div>
                                 </div>
@@ -414,6 +444,15 @@ export function LivraisonsBoard({ initialDeliveries, initialLivreurs }: Livraiso
                   className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
                 >
                   Assigner
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateRun}
+                  disabled={!assignTarget || isPending}
+                  className="rounded-full border border-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent)] disabled:opacity-40"
+                  title="Regrouper en un seul déplacement, payé au livreur selon la distance"
+                >
+                  Créer une tournée
                 </button>
                 <button
                   type="button"

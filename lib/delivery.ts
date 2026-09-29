@@ -96,3 +96,39 @@ export function mapsUrl(point: Point): string {
 export function isInGuinea(point: Point): boolean {
   return point.lat >= 7 && point.lat <= 13 && point.lng >= -15.5 && point.lng <= -7.5;
 }
+
+export type SettlementStop = {
+  status: "PLANIFIEE" | "EN_COURS" | "LIVREE" | "ECHOUEE" | "REPORTEE";
+  deliveryFee: number;
+  finalTotal: number;
+  depositAmount: number;
+};
+
+/**
+ * Montant que le livreur doit avoir encaissé pour un arrêt :
+ * - livrée : reste de la commande (total − acompte) + frais de livraison ;
+ * - échouée (cliente absente, refus…) : le déplacement a eu lieu, les frais restent dus
+ *   (mettre les frais à 0 si la boutique accorde une exemption) ;
+ * - pas encore terminée : rien.
+ */
+export function expectedCollection(stop: SettlementStop): number {
+  if (stop.status === "LIVREE") return Math.max(stop.finalTotal - stop.depositAmount, 0) + stop.deliveryFee;
+  if (stop.status === "ECHOUEE") return stop.deliveryFee;
+  return 0;
+}
+
+/**
+ * Bilan d'une tournée : encaissé attendu, frais clients, paie du livreur et montant
+ * à remettre à la boutique (encaissé − paie). `pending` = arrêts pas encore terminés.
+ */
+export function runSettlement(stops: SettlementStop[], cost: number) {
+  let collected = 0;
+  let clientFees = 0;
+  let pending = 0;
+  for (const stop of stops) {
+    collected += expectedCollection(stop);
+    if (stop.status === "LIVREE" || stop.status === "ECHOUEE") clientFees += stop.deliveryFee;
+    else pending++;
+  }
+  return { collected, clientFees, cost, toRemit: collected - cost, deliveryBalance: clientFees - cost, pending };
+}

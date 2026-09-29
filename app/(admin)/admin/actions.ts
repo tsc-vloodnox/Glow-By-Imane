@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import type { Prisma } from "@prisma/client";
 
+import { recomputeRun } from "@/lib/delivery-runs";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 import { UserError, withActionResult } from "@/lib/action-result";
@@ -554,12 +555,23 @@ async function assignLivreurImpl(deliveryIds: string[], livreurId: string | null
 
   if (deliveryIds.length === 0) return;
 
-  await prisma.delivery.updateMany({
-    where: { id: { in: deliveryIds } },
-    data: { livreurId },
+  // Une livraison qui change de livreur quitte sa tournée (celle-ci est recalculée)
+  const leaving = await prisma.delivery.findMany({
+    where: { id: { in: deliveryIds }, runId: { not: null }, run: { livreurId: { not: livreurId ?? "" } } },
+    select: { id: true, runId: true, run: { select: { settledAt: true } } },
   });
+  if (leaving.some((d) => d.run?.settledAt)) {
+    throw new UserError("Une des livraisons appartient à une tournée déjà réglée : son livreur ne peut plus changer.");
+  }
+
+  await prisma.$transaction([
+    prisma.delivery.updateMany({ where: { id: { in: leaving.map((d) => d.id) } }, data: { runId: null } }),
+    prisma.delivery.updateMany({ where: { id: { in: deliveryIds } }, data: { livreurId } }),
+  ]);
+  for (const runId of new Set(leaving.map((d) => d.runId!))) await recomputeRun(prisma, runId);
 
   revalidatePath("/admin/livraisons");
+  if (leaving.length > 0) revalidatePath("/admin/livraisons/tournees");
 }
 
 /**
