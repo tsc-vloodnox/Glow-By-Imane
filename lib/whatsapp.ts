@@ -62,3 +62,42 @@ Pouvez-vous confirmer la disponibilité et les frais de livraison ?`;
   const vendorNumber = process.env.WHATSAPP_VENDOR_NUMBER ?? "";
   return buildWhatsAppUrl(vendorNumber, message);
 }
+type WholesaleMessageInput = {
+  number: number;
+  estimatedTotal: number;
+  lines: { label: string; quantity: number }[];
+  name: string;
+  phone: string;
+  quartier: string;
+  businessName?: string | null;
+  comment?: string | null;
+};
+
+/** Message WhatsApp d'une demande revendeur (prix indicatif, à confirmer ensemble). */
+export function buildWholesaleMessage(request: WholesaleMessageInput): string {
+  const lines = request.lines.map((line) => `- ${line.label} x${line.quantity}`);
+  const info = [
+    `Nom : ${request.name}`,
+    request.businessName ? `Boutique : ${request.businessName}` : null,
+    `Téléphone : ${request.phone}`,
+    `Ville / quartier : ${request.quartier}`,
+    request.comment ? `Commentaire : ${request.comment}` : null,
+  ].filter(Boolean);
+
+  const message = `Bonjour,
+
+Je suis revendeur et je souhaite commander en gros :
+
+Demande revendeur #${request.number}
+
+${lines.join("\n")}
+
+Total indicatif : ${request.estimatedTotal.toLocaleString("fr-GN")} GNF (prix à confirmer ensemble)
+
+Mes informations :
+${info.join("\n")}
+
+Pouvez-vous me confirmer vos prix, la disponibilité et les délais ?`;
+
+  return buildWhatsAppUrl(process.env.WHATSAPP_VENDOR_NUMBER ?? "", message);
+}

@@ -424,7 +424,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
   const visible = products.filter((p) => {
     if (filter === "actifs" ? p.archived : !p.archived) return false;
     if (categoryFilter && p.categoryId !== categoryFilter) return false;
-    if (stockFilter === "rupture" && p.stock !== 0) return false;
+    if (stockFilter === "rupture" && p.stock > 0) return false;
     if (stockFilter === "bas" && !(p.stock > 0 && p.stock <= 3)) return false;
     if (q && !p.name.toLowerCase().includes(q) && !p.description.toLowerCase().includes(q)) return false;
     return true;
@@ -489,7 +489,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
         >
           <option value="tous">Tout le stock</option>
           <option value="bas">Stock bas (≤ 3)</option>
-          <option value="rupture">Rupture (0)</option>
+          <option value="rupture">Rupture / à réapprovisionner (≤ 0)</option>
         </select>
 
         {/* Reset filtres */}
@@ -529,7 +529,9 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
             const saving = savingId === product.id && isPending;
             const justSaved = justSavedId === product.id;
             const lowStock = product.stock > 0 && product.stock <= 3;
-            const outOfStock = product.stock === 0;
+            const outOfStock = product.stock <= 0;
+            // Stock négatif : unités promises à des commandes en gros, à réapprovisionner
+            const toRestock = product.stock < 0 ? -product.stock : 0;
             const thumbnail = product.images[0]
               ? `${storageBaseUrl}/${product.images[0]}`
               : null;
@@ -584,7 +586,7 @@ export function AdminProductsTable({ initialProducts, categories, storageBaseUrl
                       />
                       {outOfStock && (
                         <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Rupture
+                          {toRestock > 0 ? `${toRestock} à réapprovisionner` : "Rupture"}
                         </span>
                       )}
                       {lowStock && !outOfStock && (

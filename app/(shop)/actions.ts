@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
+import { upsertCustomer } from "@/lib/customers";
+import { notifyNewOrder } from "@/lib/push";
 import { MAX_ORDER_LINES, parseOrderInput } from "@/lib/order-validation";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { CartItemInput, OrderInput } from "@/types/types";
@@ -33,7 +36,7 @@ async function createOrderImpl(rawData: OrderInput) {
   // Les server actions sont appelables avec n'importe quel payload : on revalide tout.
   const data = parseOrderInput(rawData);
 
-  if (!checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS)) {
+  if (!(await checkRateLimit(`order:${await getClientIp()}`, ORDER_LIMIT_PER_IP, ORDER_LIMIT_WINDOW_MS))) {
     throw new UserError(TOO_MANY_ORDERS);
   }
 
@@ -73,6 +76,7 @@ async function createOrderImpl(rawData: OrderInput) {
       kitId: string | null;
       quantity: number;
       unitPrice: number;
+      components?: { create: { productId: string; productSizeId: string | null; quantity: number }[] };
     }[] = [];
 
     // 1. Validation + lignes produit (avec taille éventuelle)
@@ -125,6 +129,14 @@ async function createOrderImpl(rawData: OrderInput) {
         kitId: kit.id,
         quantity: item.quantity,
         unitPrice: kit.price,
+        // Contenu figé : une annulation restituera exactement ce qui a été vendu
+        components: {
+          create: kit.items.map((ki) => ({
+            productId: ki.productId,
+            productSizeId: ki.productSizeId,
+            quantity: ki.quantity,
+          })),
+        },
       });
     }
 
@@ -172,9 +184,13 @@ async function createOrderImpl(rawData: OrderInput) {
       estimatedTotal += GIFT_PRINT_FEE;
     }
 
-    // 6. Création de la commande seulement si tout le stock a été réservé
+    // 6. Fiche cliente (créée ou mise à jour d'après le numéro)
+    const customerId = await upsertCustomer(tx, { phone: data.phone, name: data.name, quartier: data.quartier });
+
+    // 7. Création de la commande seulement si tout le stock a été réservé
     return tx.order.create({
       data: {
+        customerId,
         name: data.name,
         phone: data.phone,
         quartier: data.quartier,
@@ -209,6 +225,8 @@ async function createOrderImpl(rawData: OrderInput) {
   });
 
   revalidatePath("/admin/commandes");
+  // Notification à l'admin après la réponse : n'ajoute aucun délai pour la cliente
+  after(() => notifyNewOrder({ ...order, kind: "DETAIL" }));
 
   return buildOrderMessage(
     order,

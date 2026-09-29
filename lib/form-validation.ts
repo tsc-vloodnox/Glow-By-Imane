@@ -20,7 +20,8 @@ export function toInt(value: unknown, label: string, options: IntOptions = {}): 
 
   const raw = typeof value === "string" ? value.replace(/\s/g, "") : value;
   if (raw === undefined || raw === null || raw === "") {
-    if (optional) return min;
+    // Valeur vide et optionnelle : 0, ramené dans les bornes (ex: min 1 → 1 ; min négatif → 0)
+    if (optional) return Math.min(Math.max(0, min), max);
     throw new UserError(`${label} requis.`);
   }
 

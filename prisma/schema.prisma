@@ -18,6 +18,14 @@ enum OrderStatus {
   ANNULEE
 }
 
+/// DETAIL : commande boutique classique (stock réservé à la création).
+/// GROS : demande revendeur — prix négociés, stock réservé seulement à la confirmation
+/// (et pouvant devenir négatif = à réapprovisionner).
+enum OrderKind {
+  DETAIL
+  GROS
+}
+
 enum DeliveryStatus {
   PLANIFIEE
   EN_COURS
@@ -151,21 +159,29 @@ model KitItem {
   @@index([productId])
 }
 
+/// Fiche cliente, créée/mise à jour automatiquement à chaque commande.
+/// `phone` est normalisé au format international sans "+" (224XXXXXXXXX) : un même
+/// numéro saisi "620 00 00 00" ou "+224620000000" désigne la même cliente.
 model Customer {
-  id         String   @id @default(cuid())
-  phone      String   @unique
-  name       String
-  quartier   String
-  loyaltyPts Int      @default(0)
-  vip        Boolean  @default(false)
-  orders     Order[]
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  phone        String   @unique
+  name         String
+  quartier     String
+  businessName String? // nom de la boutique (revendeurs)
+  isReseller   Boolean  @default(false)
+  notes        String? // notes internes de l'admin
+  loyaltyPts   Int      @default(0) // règles de fidélité pas encore définies
+  vip          Boolean  @default(false)
+  orders       Order[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 model Order {
   id     String      @id @default(cuid())
   number Int         @unique @default(autoincrement())
   status OrderStatus @default(NOUVELLE)
+  kind   OrderKind   @default(DETAIL)
   source String      @default("app")
 
   customerId String?
@@ -176,12 +192,20 @@ model Order {
   quartier String
   comment  String?
 
+  /// Nom de la boutique (commandes en gros)
+  businessName String?
+
   estimatedTotal Int
 
   discountAmount Int     @default(0)
   discountReason String?
 
   finalTotal Int @default(0)
+
+  /// Acompte encaissé hors application (espèces, mobile money…) : simple suivi interne
+  depositAmount Int       @default(0)
+  depositPaidAt DateTime?
+  depositNote   String?
 
   /// true tant que le stock des articles est réservé (décrémenté) par cette commande.
   /// Passe à false quand le stock est restitué (annulation / suppression) → jamais restitué deux fois.
@@ -196,6 +220,7 @@ model Order {
   updatedAt DateTime @default(now()) @updatedAt
 
   @@index([status, createdAt])
+  @@index([kind, createdAt])
   @@index([createdAt])
   @@index([phone, createdAt]) // anti-spam : commandes récentes par téléphone
 }
@@ -217,10 +242,27 @@ model OrderItem {
   quantity  Int
   unitPrice Int
 
+  /// Kit : contenu exact au moment de la commande (le kit peut être modifié ensuite)
+  components OrderItemComponent[]
+
   @@index([orderId])
   @@index([productId])
   @@index([productSizeId])
   @@index([kitId])
+}
+
+/// Composant d'un kit commandé, figé au moment de la commande (quantité par unité de kit).
+/// Volontairement sans clé étrangère vers Product/ProductSize : c'est une copie historique,
+/// qui ne doit pas empêcher de supprimer plus tard une taille ou un produit.
+model OrderItemComponent {
+  id            String    @id @default(cuid())
+  orderItemId   String
+  orderItem     OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  productId     String
+  productSizeId String?
+  quantity      Int
+
+  @@index([orderItemId])
 }
 
 model PushSubscription {

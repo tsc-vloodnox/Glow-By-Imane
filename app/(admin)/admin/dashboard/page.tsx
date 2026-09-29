@@ -2,7 +2,9 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { withDatabaseFallback } from "@/lib/db";
+import { getRestockNeeds } from "@/lib/restock";
 import { requireAdmin } from "../actions";
+import { PushNotificationsToggle } from "../_components/PushNotificationsToggle";
 
 const statusLabels: Record<string, string> = {
   NOUVELLE: "Nouvelle",
@@ -21,6 +23,8 @@ export default async function AdminDashboardPage() {
   // Lit le cookie de session → page rendue à chaque visite (sinon Next la pré-générait
   // au build et les statistiques restaient figées)
   await requireAdmin();
+
+  const restockNeeds = await withDatabaseFallback(getRestockNeeds, []);
 
   const [
     orderCount,
@@ -49,7 +53,8 @@ export default async function AdminDashboardPage() {
           where: { status: { in: ["PLANIFIEE", "EN_COURS"] }, livreurId: null },
         }),
         prisma.product.findMany({
-          where: { archived: false, stock: { lte: 3 } },
+          // Stock négatif exclu : affiché dans « À réapprovisionner »
+          where: { archived: false, stock: { gte: 0, lte: 3 } },
           orderBy: { stock: "asc" },
           take: 5,
           select: { id: true, name: true, stock: true },
@@ -80,6 +85,8 @@ export default async function AdminDashboardPage() {
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <p className="text-sm text-[var(--color-muted)]">Glow by Imane — Admin</p>
       </div>
+
+      <PushNotificationsToggle />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-xl border border-[var(--color-border)] bg-white p-6">
@@ -118,6 +125,34 @@ export default async function AdminDashboardPage() {
         </Link>
       </div>
 
+      {restockNeeds.length > 0 && (
+        <section>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-medium">À réapprovisionner</h2>
+            <Link href="/admin/commandes?type=gros" className="text-sm text-[var(--color-accent)]">
+              Commandes en gros
+            </Link>
+          </div>
+          <p className="mb-2 text-sm text-[var(--color-muted)]">
+            Quantités promises à des revendeurs au-delà du stock disponible.
+          </p>
+          <div className="overflow-hidden rounded-xl border border-indigo-200 bg-indigo-50">
+            <ul className="divide-y divide-indigo-200">
+              {restockNeeds.map((need) => (
+                <li key={need.key} className="flex items-center justify-between px-4 py-3">
+                  <Link href={`/admin/produits/${need.productId}/edit`} className="text-sm font-medium hover:underline">
+                    {need.label}
+                  </Link>
+                  <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700">
+                    {need.missing} à commander
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
       {lowStockProducts.length > 0 && (
         <section>
           <div className="mb-4 flex items-center justify-between">
@@ -132,7 +167,11 @@ export default async function AdminDashboardPage() {
                 <li key={product.id} className="flex items-center justify-between px-4 py-3">
                   <span className="text-sm font-medium">{product.name}</span>
                   <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                    {product.stock === 0 ? "Rupture" : `${product.stock} en stock`}
+                    {product.stock < 0
+                      ? `${-product.stock} à réapprovisionner`
+                      : product.stock === 0
+                        ? "Rupture"
+                        : `${product.stock} en stock`}
                   </span>
                 </li>
               ))}

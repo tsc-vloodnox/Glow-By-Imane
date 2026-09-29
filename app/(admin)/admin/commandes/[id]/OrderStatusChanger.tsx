@@ -12,9 +12,11 @@ const updateOrderStatus = unwrapAction(updateOrderStatusAction);
 type Props = {
   orderId: string;
   currentStatus: OrderStatus;
+  /** Commande en gros non encore réservée : la confirmation réservera le stock */
+  reservesStockOnConfirm?: boolean;
 };
 
-export function OrderStatusChanger({ orderId, currentStatus }: Props) {
+export function OrderStatusChanger({ orderId, currentStatus, reservesStockOnConfirm = false }: Props) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const cfg = ORDER_STATUS_CONFIG[currentStatus];
@@ -43,6 +45,13 @@ export function OrderStatusChanger({ orderId, currentStatus }: Props) {
               disabled={isPending}
               onClick={() => {
                 if (isCancel && !window.confirm("Annuler cette commande ? Les articles réservés seront remis en stock.")) return;
+              if (
+                next === "CONFIRMEE" &&
+                reservesStockOnConfirm &&
+                !window.confirm(
+                  "Confirmer l'accord ? Le stock sera réservé maintenant, même au-delà du disponible (la différence sera à réapprovisionner).",
+                )
+              ) return;
                 setError(null);
                 startTransition(async () => {
                   try {

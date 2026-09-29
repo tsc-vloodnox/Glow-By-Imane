@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
+import { orderItemLabel } from "@/lib/order-items";
 import { requireAdmin } from "../actions";
 import { BulkDeleteOrders } from "./BulkDeleteOrders";
 
@@ -17,21 +18,30 @@ const FILTER_STATUSES: Array<OrderStatus | "TOUTES"> = [
 ];
 
 type Props = {
-  searchParams: Promise<{ statut?: string }>;
+  searchParams: Promise<{ statut?: string; type?: string }>;
 };
 
 export default async function AdminCommandesPage({ searchParams }: Props) {
   await requireAdmin();
 
-  const { statut } = await searchParams;
+  const { statut, type } = await searchParams;
   const activeFilter = (statut ?? "TOUTES") as OrderStatus | "TOUTES";
+  const wholesaleOnly = type === "gros";
+  const kindWhere = wholesaleOnly ? { kind: "GROS" as const } : {};
+  // Conserve le filtre « en gros » quand on change de statut
+  const withType = (href: string) =>
+    wholesaleOnly ? `${href}${href.includes("?") ? "&" : "?"}type=gros` : href;
 
   const orders = await prisma.order.findMany({
-    where: activeFilter !== "TOUTES" ? { status: activeFilter } : undefined,
+    where: { ...kindWhere, ...(activeFilter !== "TOUTES" ? { status: activeFilter } : {}) },
     orderBy: { createdAt: "desc" },
     include: {
       items: {
-        include: { product: { select: { name: true } } },
+        include: {
+          product: { select: { name: true } },
+          productSize: { select: { label: true } },
+          kit: { select: { name: true } },
+        },
       },
       delivery: { select: { status: true, scheduledAt: true } },
       giftCard: { select: { id: true } },
@@ -40,7 +50,11 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
 
   const counts = await prisma.order.groupBy({
     by: ["status"],
+    where: kindWhere,
     _count: true,
+  });
+  const wholesaleCount = await prisma.order.count({
+    where: { kind: "GROS", status: { notIn: ["LIVREE", "ANNULEE"] } },
   });
   const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count]));
   const totalCount = counts.reduce((sum, c) => sum + c._count, 0);
@@ -68,6 +82,30 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
         </div>
       </div>
 
+      {/* Type de commande */}
+      <div className="flex gap-1.5">
+        {[
+          { label: "Toutes les commandes", href: activeFilter === "TOUTES" ? "/admin/commandes" : `/admin/commandes?statut=${activeFilter}`, active: !wholesaleOnly },
+          {
+            label: `En gros${wholesaleCount ? ` · ${wholesaleCount} en cours` : ""}`,
+            href: activeFilter === "TOUTES" ? "/admin/commandes?type=gros" : `/admin/commandes?statut=${activeFilter}&type=gros`,
+            active: wholesaleOnly,
+          },
+        ].map((tab) => (
+          <Link
+            key={tab.label}
+            href={tab.href}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+              tab.active
+                ? "bg-indigo-600 text-white"
+                : "border border-[var(--color-border)] bg-white text-[var(--color-muted)] hover:text-indigo-700"
+            }`}
+          >
+            {tab.label}
+          </Link>
+        ))}
+      </div>
+
       {/* Filtres — scroll horizontal, masque la scrollbar visuellement */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {FILTER_STATUSES.map((s) => {
@@ -78,7 +116,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
           return (
             <Link
               key={s}
-              href={s === "TOUTES" ? "/admin/commandes" : `/admin/commandes?statut=${s}`}
+              href={withType(s === "TOUTES" ? "/admin/commandes" : `/admin/commandes?statut=${s}`)}
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                 isActive
                   ? "bg-[var(--color-accent)] text-white"
@@ -107,7 +145,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
             const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
             const itemSummary = order.items
               .slice(0, 2)
-              .map((i) => `${i.quantity}× ${i.product?.name ?? "Produit supprimé"}`)
+              .map((i) => `${i.quantity}× ${orderItemLabel(i)}`)
               .join(", ");
             const moreItems = order.items.length > 2 ? ` +${order.items.length - 2}` : "";
 
@@ -123,7 +161,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
                     <span className="font-medium">#{order.number}</span>
                     {/* Nom tronqué sur mobile, plein sur sm+ */}
                     <span className="max-w-[120px] truncate text-sm text-[var(--color-muted)] sm:max-w-none">
-                      {order.name}
+                      {order.businessName ? `${order.name} · ${order.businessName}` : order.name}
                     </span>
                     <span className="hidden text-xs text-[var(--color-muted)] sm:inline">
                       · {order.quartier}
@@ -141,9 +179,14 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
                 {/* Droite : total + badges empilés proprement */}
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
                   <span className="text-sm font-medium tabular-nums">
-                    {order.estimatedTotal.toLocaleString("fr-GN")} GNF
+                    {order.finalTotal.toLocaleString("fr-GN")} GNF
                   </span>
                   <div className="flex flex-wrap justify-end gap-1">
+                    {order.kind === "GROS" && (
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700 whitespace-nowrap">
+                        En gros
+                      </span>
+                    )}
                     {order.giftCard && (
                       <span
                         className="rounded-full bg-pink-100 px-2 py-0.5 text-[10px] font-medium text-pink-700 whitespace-nowrap"

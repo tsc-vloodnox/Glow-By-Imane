@@ -3,12 +3,15 @@ import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
+import { orderItemLabel } from "@/lib/order-items";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import { requireAdmin } from "../../actions";
 import { OrderStatusChanger } from "./OrderStatusChanger";
 import { DeliveryPanel } from "./DeliveryPanel";
 import { OrderDiscountEditor } from "./OrderDiscountEditor";
 import { GiftCardPanel } from "./GiftCardPanel";
+import { WholesaleLinesEditor } from "./WholesaleLinesEditor";
+import { DepositPanel } from "./DepositPanel";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -16,6 +19,7 @@ const SOURCE_LABEL: Record<string, string> = {
   app: "Application",
   whatsapp: "WhatsApp",
   admin: "Saisie admin",
+  revendeur: "Espace revendeurs",
 };
 
 export default async function OrderDetailPage({ params }: Props) {
@@ -28,6 +32,7 @@ export default async function OrderDetailPage({ params }: Props) {
       items: {
         include: {
           product: { select: { id: true, name: true, images: true } },
+          productSize: { select: { label: true } },
           kit: { select: { id: true, name: true } },
         },
       },
@@ -40,6 +45,10 @@ export default async function OrderDetailPage({ params }: Props) {
   if (!order) notFound();
 
   const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
+  const isWholesale = order.kind === "GROS";
+  const customerOrderCount = order.customerId
+    ? await prisma.order.count({ where: { customerId: order.customerId } })
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -51,6 +60,9 @@ export default async function OrderDetailPage({ params }: Props) {
           </Link>
           <div className="mt-1 flex items-center gap-3">
             <h1 className="text-2xl font-semibold">Commande #{order.number}</h1>
+            {isWholesale && (
+              <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">En gros</span>
+            )}
             {order.source !== "app" && (
               <span className="rounded-full border border-[var(--color-border)] px-2.5 py-0.5 text-xs text-[var(--color-muted)]">
                 {SOURCE_LABEL[order.source] ?? order.source}
@@ -74,26 +86,43 @@ export default async function OrderDetailPage({ params }: Props) {
         <div className="space-y-4 lg:col-span-2">
           {/* Articles + totaux */}
           <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
-            <h2 className="mb-3 font-medium">Articles & total</h2>
-            <ul className="divide-y divide-[var(--color-border)]">
-              {order.items.map((item) => (
-                <li key={item.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-sand)] text-xs font-semibold text-[var(--color-accent)]">
-                      {item.quantity}
+            <h2 className="mb-3 font-medium">{isWholesale ? "Articles & prix négociés" : "Articles & total"}</h2>
+            {isWholesale ? (
+              <WholesaleLinesEditor
+                key={order.items.map((i) => `${i.id}:${i.quantity}:${i.unitPrice}`).join("|")}
+                orderId={order.id}
+                lines={order.items.map((item) => ({
+                  id: item.id,
+                  label: orderItemLabel(item),
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                }))}
+                quantitiesLocked={order.stockReserved}
+                readOnly={order.status === "LIVREE" || order.status === "ANNULEE"}
+              />
+            ) : (
+              <ul className="divide-y divide-[var(--color-border)]">
+                {order.items.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-sand)] text-xs font-semibold text-[var(--color-accent)]">
+                        {item.quantity}
+                      </span>
+                      <span className="text-sm">{orderItemLabel(item)}</span>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium">
+                      {(item.unitPrice * item.quantity).toLocaleString("fr-GN")} GNF
                     </span>
-                    <span className="text-sm">{item.product?.name ?? "Produit supprimé"}</span>
-                  </div>
-                  <span className="shrink-0 text-sm font-medium">
-                    {(item.unitPrice * item.quantity).toLocaleString("fr-GN")} GNF
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             {/* Remise */}
             <div className="mt-4 border-t border-[var(--color-border)] pt-4">
               <OrderDiscountEditor
+                // Réinitialise l'éditeur quand le total change (prix négociés modifiés)
+                key={`${order.estimatedTotal}:${order.discountAmount}`}
                 orderId={order.id}
                 estimatedTotal={order.estimatedTotal}
                 discountAmount={order.discountAmount}
@@ -106,7 +135,17 @@ export default async function OrderDetailPage({ params }: Props) {
           {/* Statut */}
           <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
             <h2 className="mb-3 font-medium">Changer le statut</h2>
-            <OrderStatusChanger orderId={order.id} currentStatus={order.status as OrderStatus} />
+            {isWholesale && !order.stockReserved && order.status !== "ANNULEE" && (
+              <p className="mb-3 rounded-lg bg-indigo-50 p-2.5 text-xs text-indigo-800">
+                Stock non réservé. Il le sera au passage à « Confirmée » (accord conclu), même au-delà du
+                disponible : la différence apparaîtra « à réapprovisionner ».
+              </p>
+            )}
+            <OrderStatusChanger
+              orderId={order.id}
+              currentStatus={order.status as OrderStatus}
+              reservesStockOnConfirm={isWholesale && !order.stockReserved}
+            />
           </section>
 
           {/* Livraison */}
@@ -158,6 +197,16 @@ export default async function OrderDetailPage({ params }: Props) {
 
         {/* Colonne client */}
         <div className="space-y-4">
+          {isWholesale && (
+            <DepositPanel
+              orderId={order.id}
+              finalTotal={order.finalTotal}
+              deliveryFee={order.delivery?.deliveryFee ?? 0}
+              depositAmount={order.depositAmount}
+              depositPaidAt={order.depositPaidAt}
+              depositNote={order.depositNote}
+            />
+          )}
           <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
             <h2 className="mb-3 font-medium">Client</h2>
             <dl className="space-y-2 text-sm">
@@ -165,6 +214,12 @@ export default async function OrderDetailPage({ params }: Props) {
                 <dt className="text-[var(--color-muted)]">Nom</dt>
                 <dd className="font-medium">{order.name}</dd>
               </div>
+              {order.businessName && (
+                <div>
+                  <dt className="text-[var(--color-muted)]">Boutique</dt>
+                  <dd>{order.businessName}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-[var(--color-muted)]">Téléphone</dt>
                 <dd>
@@ -192,20 +247,20 @@ export default async function OrderDetailPage({ params }: Props) {
           </section>
 
           {order.customer && (
-            <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
-              <h2 className="mb-3 font-medium">Profil client</h2>
-              <dl className="space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <dt className="text-[var(--color-muted)]">Points fidélité</dt>
-                  <dd className="font-semibold text-[var(--color-accent)]">{order.customer.loyaltyPts} pts</dd>
-                </div>
-                {order.customer.vip && (
-                  <dd className="rounded-full bg-[var(--color-blush)] px-3 py-1 text-center text-xs font-medium text-[var(--color-accent)]">
-                    ⭐ Cliente VIP
-                  </dd>
+            <Link
+              href={`/admin/clientes/${order.customer.id}`}
+              className="block rounded-xl border border-[var(--color-border)] bg-white p-4 hover:border-[var(--color-accent)]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-medium">Fiche cliente</h2>
+                {order.customer.isReseller && (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">Revendeur</span>
                 )}
-              </dl>
-            </section>
+              </div>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                {customerOrderCount} commande{customerOrderCount > 1 ? "s" : ""} au total · voir l&apos;historique →
+              </p>
+            </Link>
           )}
         </div>
       </div>

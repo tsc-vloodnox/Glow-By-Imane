@@ -1,6 +1,7 @@
 // Destination : app/(shop)/components/ShopPageClient.tsx
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { FavoritesCarousel } from "./FavoritesCarousel";
@@ -186,6 +187,19 @@ export function ShopPageClient({
       </section>
 
       <KitsCarousel kits={kits} />
+
+      <section className="mt-8 px-4">
+        <Link
+          href="/revendeur"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--color-border)] bg-white p-4"
+        >
+          <div>
+            <p className="font-serif text-lg text-[var(--color-accent)]">Vous êtes revendeur ?</p>
+            <p className="text-xs text-[var(--color-muted)]">Commandes en gros, prix dégressifs, tarifs confirmés sur WhatsApp.</p>
+          </div>
+          <span aria-hidden="true" className="text-xl text-[var(--color-accent)]">→</span>
+        </Link>
+      </section>
 
       <section className="mt-8 px-4 grid grid-cols-2 gap-3">
         <div className="flex items-center gap-2 rounded-xl bg-[var(--color-blush)] p-3">

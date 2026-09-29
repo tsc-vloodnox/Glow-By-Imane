@@ -17,7 +17,12 @@ describe("toInt", () => {
     expect(() => toInt(100, "Pourcentage", { min: 1, max: 99 })).toThrow(/inférieur ou égal à 99/);
   });
 
-  it("valeur vide : erreur, sauf si optionnelle (renvoie min)", () => {
+  it("valeur vide optionnelle avec minimum négatif : 0, pas le minimum", () => {
+    expect(toInt("", "Stock", { optional: true, min: -1_000_000 })).toBe(0);
+    expect(toInt("-20", "Stock", { min: -1_000_000 })).toBe(-20);
+  });
+
+  it("valeur vide : erreur, sauf si optionnelle (renvoie 0, ou min s'il est positif)", () => {
     expect(() => toInt("", "Prix")).toThrow(/Prix requis/);
     expect(toInt("", "Stock", { optional: true })).toBe(0);
     expect(toInt(null, "Remise", { optional: true })).toBe(0);
