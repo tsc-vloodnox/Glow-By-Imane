@@ -30,10 +30,16 @@ export type GiftInput = {
 export type OrderInput = {
   name: string;
   phone: string;
+  /** Livraison : quartier libre (« Autre quartier ») ou précisions (rue, repère) si quartierId est fourni */
   quartier: string;
   comment?: string;
   items: CartItemInput[];
   gift?: GiftInput;
+  deliveryMode: "LIVRAISON" | "RETRAIT";
+  /** Quartier de référence choisi dans la liste */
+  quartierId?: string | null;
+  /** Position partagée volontairement par la cliente */
+  location?: { lat: number; lng: number } | null;
 };
 
 // ─── Statuts ─────────────────────────────────────────────────────────────────

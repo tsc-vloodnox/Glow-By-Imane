@@ -11,6 +11,14 @@ import { trackPixelEvent } from "@/lib/fbpixel";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
 import { GUINEA_PHONE_PATTERN as PHONE_PATTERN } from "@/lib/order-validation";
 import { uploadGiftPhoto as uploadGiftPhotoAction } from "./gift-upload";
+import {
+  DeliveryChoice,
+  OTHER_QUARTIER,
+  feeLabelFor,
+  type DeliveryValue,
+  type PickupPointInfo,
+  type QuartierOption,
+} from "./DeliveryChoice";
 import { unwrapAction } from "@/lib/action-result";
 
 // Actions serveur : lèvent une Error au message lisible en cas d'échec (cf. lib/action-result.ts)
@@ -33,7 +41,9 @@ async function compressImage(file: File): Promise<File> {
   }
 }
 
-export default function CheckoutPageClient() {
+type Props = { quartiers: QuartierOption[]; pickupPoint: PickupPointInfo | null };
+
+export default function CheckoutPageClient({ quartiers, pickupPoint }: Props) {
   const { items, total, clear, replaceAll } = useCart();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(true);
@@ -41,6 +51,7 @@ export default function CheckoutPageClient() {
   const [priceNotice, setPriceNotice] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
+  const [delivery, setDelivery] = useState<DeliveryValue>({ mode: "LIVRAISON", quartierId: "", location: null });
   const [isGift, setIsGift] = useState(false);
   const [printRequested, setPrintRequested] = useState(false);
   const [giftPhoneError, setGiftPhoneError] = useState<string | null>(null);
@@ -143,10 +154,18 @@ export default function CheckoutPageClient() {
       };
     }
 
+    if (delivery.mode === "LIVRAISON" && !delivery.quartierId) {
+      setMessage("Choisissez votre quartier de livraison.");
+      return;
+    }
+
     const payload = {
       name: String(formData.get("name") || "").trim(),
       phone,
       quartier: String(formData.get("quartier") || "").trim(),
+      deliveryMode: delivery.mode,
+      quartierId: delivery.mode === "LIVRAISON" && delivery.quartierId !== OTHER_QUARTIER ? delivery.quartierId : null,
+      location: delivery.mode === "LIVRAISON" ? delivery.location : null,
       comment: String(formData.get("comment") || "").trim() || undefined,
       items: items.map((item) =>
         item.kind === "kit"
@@ -217,8 +236,12 @@ export default function CheckoutPageClient() {
             </div>
           )}
         </div>
+        <div className="mt-2 flex items-center justify-between text-sm text-[var(--color-muted)]">
+          <span>{delivery.mode === "RETRAIT" ? "Retrait en boutique" : "Livraison (réglée à la réception)"}</span>
+          <span>{feeLabelFor(delivery, quartiers) ?? (delivery.quartierId ? "À confirmer" : "Choisissez un quartier")}</span>
+        </div>
         <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-3 text-sm font-semibold text-[var(--color-accent)]">
-          <span>Total</span>
+          <span>Total articles</span>
           <span>
             {isRefreshing
               ? "..."
@@ -247,10 +270,7 @@ export default function CheckoutPageClient() {
           {phoneError ? <span className="text-xs text-red-600">{phoneError}</span> : null}
         </label>
 
-        <label className="block space-y-1">
-          <span className="text-sm font-medium">Quartier</span>
-          <input name="quartier" required className="w-full rounded-xl border border-[var(--color-border)] px-4 py-3" placeholder="Ex. Kaloum" />
-        </label>
+        <DeliveryChoice quartiers={quartiers} pickupPoint={pickupPoint} value={delivery} onChange={setDelivery} />
 
         <label className="block space-y-1">
           <span className="text-sm font-medium">Commentaire (optionnel)</span>

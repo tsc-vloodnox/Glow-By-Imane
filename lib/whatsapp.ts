@@ -1,4 +1,12 @@
+import { formatFeeRange, mapsUrl } from "@/lib/delivery";
 import type { OrderWithItems } from "@/types/types";
+
+type DeliveryDetails = {
+  mode: "LIVRAISON" | "RETRAIT";
+  feeMin: number | null;
+  feeMax: number | null;
+  location: { lat: number; lng: number } | null;
+};
 
 type CustomerDetails = { name: string; phone: string; quartier: string; comment?: string };
 
@@ -26,6 +34,7 @@ export function buildOrderMessage(
   order: OrderWithItems,
   customer: CustomerDetails,
   giftPrintFee?: number,
+  delivery?: DeliveryDetails,
 ): string {
   const lines = order.items.map((item) => {
     if (item.kit) return `- ${item.kit.name} (kit) x${item.quantity}`;
@@ -37,10 +46,14 @@ export function buildOrderMessage(
     lines.push(`- Impression de la carte cadeau : ${giftPrintFee.toLocaleString("fr-GN")} GNF`);
   }
 
+  const isPickup = delivery?.mode === "RETRAIT";
+  const feeRange = delivery ? formatFeeRange(delivery.feeMin, delivery.feeMax) : null;
   const customerInfo = [
     `Nom : ${customer.name}`,
     `Téléphone : ${customer.phone}`,
-    `Quartier : ${customer.quartier}`,
+    isPickup ? `Mode : ${customer.quartier}` : `Quartier : ${customer.quartier}`,
+    !isPickup && delivery ? `Frais de livraison estimés : ${feeRange ?? "à confirmer"}` : null,
+    !isPickup && delivery?.location ? `Ma position : ${mapsUrl(delivery.location)}` : null,
     customer.comment ? `Commentaire : ${customer.comment}` : null,
   ].filter(Boolean);
 
@@ -57,7 +70,7 @@ Montant estimé : ${order.estimatedTotal.toLocaleString("fr-GN")} GNF
 Informations client :
 ${customerInfo.join("\n")}
 
-Pouvez-vous confirmer la disponibilité et les frais de livraison ?`;
+${isPickup ? "Pouvez-vous me dire quand la commande sera prête à récupérer ?" : "Pouvez-vous confirmer la disponibilité et les frais de livraison ?"}`;
 
   const vendorNumber = process.env.WHATSAPP_VENDOR_NUMBER ?? "";
   return buildWhatsAppUrl(vendorNumber, message);

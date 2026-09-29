@@ -33,6 +33,8 @@ type Props = {
   orderPhone: string;
   orderQuartier: string;
   orderFinalTotal: number;
+  /** Frais proposés par défaut à la planification (bas de la fourchette annoncée) */
+  suggestedFee?: number | null;
   delivery: DeliveryData;
   giftDelivery?: GiftDelivery;
 };
@@ -44,6 +46,7 @@ export function DeliveryPanel({
   orderPhone,
   orderQuartier,
   orderFinalTotal,
+  suggestedFee,
   delivery,
   giftDelivery,
 }: Props) {
@@ -183,7 +186,7 @@ export function DeliveryPanel({
               type="number"
               name="deliveryFee"
               min="0"
-              defaultValue={0}
+              defaultValue={suggestedFee ?? 0}
               className="w-full rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm"
               placeholder="0"
             />

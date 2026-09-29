@@ -225,6 +225,9 @@ export function ShopPageClient({
 
         <InstallPrompt />
       </section>
+      <p className="mt-8 px-4 pb-6 text-center text-[11px] text-[var(--color-muted)]">
+        <Link href="/confidentialite" className="underline">Confidentialité</Link>
+      </p>
     </main>
   );
 }

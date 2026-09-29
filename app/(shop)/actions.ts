@@ -49,6 +49,21 @@ async function createOrderImpl(rawData: OrderInput) {
     throw new UserError(TOO_MANY_ORDERS);
   }
 
+  // Livraison : quartier de référence choisi (fourchette de frais figée) ou quartier libre ;
+  // retrait : au point relais par défaut.
+  const [quartierRef, pickupPoint] = await Promise.all([
+    data.quartierId ? prisma.quartier.findFirst({ where: { id: data.quartierId, active: true } }) : null,
+    prisma.pickupPoint.findFirst({ where: { isDefault: true, active: true } }),
+  ]);
+  if (data.quartierId && !quartierRef) throw new UserError("Quartier introuvable. Rechargez la page.");
+
+  const addressLabel =
+    data.deliveryMode === "RETRAIT"
+      ? `Retrait — ${pickupPoint?.name ?? "boutique"}`
+      : quartierRef
+        ? [quartierRef.name, data.quartier].filter(Boolean).join(" — ")
+        : data.quartier;
+
   const order = await prisma.$transaction(async (tx) => {
     const productItems = data.items.filter(
       (i): i is Extract<CartItemInput, { kind: "product" }> => i.kind === "product",
@@ -185,7 +200,12 @@ async function createOrderImpl(rawData: OrderInput) {
     }
 
     // 6. Fiche cliente (créée ou mise à jour d'après le numéro)
-    const customerId = await upsertCustomer(tx, { phone: data.phone, name: data.name, quartier: data.quartier });
+    const customerId = await upsertCustomer(tx, {
+      phone: data.phone,
+      name: data.name,
+      // Un retrait ne dit rien de l'adresse : on garde celle de la fiche si elle existe
+      quartier: data.deliveryMode === "RETRAIT" ? "Retrait en boutique" : addressLabel,
+    });
 
     // 7. Création de la commande seulement si tout le stock a été réservé
     return tx.order.create({
@@ -193,7 +213,14 @@ async function createOrderImpl(rawData: OrderInput) {
         customerId,
         name: data.name,
         phone: data.phone,
-        quartier: data.quartier,
+        quartier: addressLabel,
+        deliveryMode: data.deliveryMode,
+        quartierId: quartierRef?.id ?? null,
+        pickupPointId: pickupPoint?.id ?? null,
+        deliveryFeeMin: data.deliveryMode === "RETRAIT" ? 0 : (quartierRef?.feeMin ?? null),
+        deliveryFeeMax: data.deliveryMode === "RETRAIT" ? 0 : (quartierRef?.feeMax ?? null),
+        locationLat: data.location?.lat ?? null,
+        locationLng: data.location?.lng ?? null,
         comment: data.comment,
         estimatedTotal,
         finalTotal: estimatedTotal,
@@ -233,10 +260,16 @@ async function createOrderImpl(rawData: OrderInput) {
     {
       name: data.name,
       phone: data.phone,
-      quartier: data.quartier,
+      quartier: addressLabel,
       comment: data.comment,
     },
     data.gift?.printRequested ? GIFT_PRINT_FEE : undefined,
+    {
+      mode: data.deliveryMode,
+      feeMin: data.deliveryMode === "RETRAIT" ? 0 : (quartierRef?.feeMin ?? null),
+      feeMax: data.deliveryMode === "RETRAIT" ? 0 : (quartierRef?.feeMax ?? null),
+      location: data.location ?? null,
+    },
   );
 }
 
