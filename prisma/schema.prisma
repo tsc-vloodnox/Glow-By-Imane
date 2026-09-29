@@ -217,10 +217,27 @@ model OrderItem {
   quantity  Int
   unitPrice Int
 
+  /// Kit : contenu exact au moment de la commande (le kit peut être modifié ensuite)
+  components OrderItemComponent[]
+
   @@index([orderId])
   @@index([productId])
   @@index([productSizeId])
   @@index([kitId])
+}
+
+/// Composant d'un kit commandé, figé au moment de la commande (quantité par unité de kit).
+/// Volontairement sans clé étrangère vers Product/ProductSize : c'est une copie historique,
+/// qui ne doit pas empêcher de supprimer plus tard une taille ou un produit.
+model OrderItemComponent {
+  id            String    @id @default(cuid())
+  orderItemId   String
+  orderItem     OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  productId     String
+  productSizeId String?
+  quantity      Int
+
+  @@index([orderItemId])
 }
 
 model PushSubscription {

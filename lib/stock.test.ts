@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { releaseOrderStock } from "./stock";
 
+type Component = { productId: string; productSizeId: string | null; quantity: number };
 type Item = {
   productId: string | null;
   productSizeId: string | null;
   quantity: number;
-  kit: { items: { productId: string; productSizeId: string | null; quantity: number }[] } | null;
+  components?: Component[];
+  kit: { items: Component[] } | null;
 };
 
 /** Faux client de transaction : simule le drapeau stockReserved et enregistre les restitutions. */
@@ -21,7 +23,7 @@ function fakeTx(items: Item[], reserved = true) {
         return { count };
       }),
     },
-    orderItem: { findMany: vi.fn(async () => items) },
+    orderItem: { findMany: vi.fn(async () => items.map((i) => ({ components: [], ...i }))) },
     product: { updateMany: vi.fn(async () => ({ count: 1 })) },
     productSize: { updateMany: vi.fn(async () => ({ count: 1 })) },
   };
@@ -59,6 +61,24 @@ describe("releaseOrderStock", () => {
       ["s1", 3],
       ["s2", 4], // 2 par kit × 2 kits
     ]);
+  });
+
+  it("kit : restitue le contenu figé à la commande, pas la composition actuelle", async () => {
+    const tx = fakeTx([
+      {
+        productId: null,
+        productSizeId: null,
+        quantity: 3,
+        // Contenu vendu : 2 × p1 par kit
+        components: [{ productId: "p1", productSizeId: null, quantity: 2 }],
+        // Kit modifié depuis : contient désormais p9
+        kit: { items: [{ productId: "p9", productSizeId: null, quantity: 1 }] },
+      },
+    ]);
+
+    await releaseOrderStock(tx, "order-1");
+
+    expect(incrementOf(tx.product.updateMany)).toEqual([["p1", 6]]);
   });
 
   it("est idempotent : un second appel ne restitue rien", async () => {

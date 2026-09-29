@@ -73,6 +73,7 @@ async function createOrderImpl(rawData: OrderInput) {
       kitId: string | null;
       quantity: number;
       unitPrice: number;
+      components?: { create: { productId: string; productSizeId: string | null; quantity: number }[] };
     }[] = [];
 
     // 1. Validation + lignes produit (avec taille éventuelle)
@@ -125,6 +126,14 @@ async function createOrderImpl(rawData: OrderInput) {
         kitId: kit.id,
         quantity: item.quantity,
         unitPrice: kit.price,
+        // Contenu figé : une annulation restituera exactement ce qui a été vendu
+        components: {
+          create: kit.items.map((ki) => ({
+            productId: ki.productId,
+            productSizeId: ki.productSizeId,
+            quantity: ki.quantity,
+          })),
+        },
       });
     }
 

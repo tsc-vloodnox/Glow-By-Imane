@@ -9,8 +9,9 @@ import type { Prisma } from "@prisma/client";
  * basculé de façon atomique avant toute restitution, donc un double appel
  * (double clic, requêtes concurrentes) ne recrédite jamais deux fois.
  *
- * Kits : OrderItem ne fige pas la composition du kit au moment de la commande,
- * on restitue donc selon la composition ACTUELLE du kit.
+ * Kits : on restitue le contenu figé au moment de la commande (OrderItemComponent).
+ * Commandes antérieures à cette fonctionnalité (aucun composant enregistré) :
+ * repli sur la composition ACTUELLE du kit.
  */
 export async function releaseOrderStock(tx: Prisma.TransactionClient, orderId: string) {
   const claimed = await tx.order.updateMany({
@@ -21,7 +22,7 @@ export async function releaseOrderStock(tx: Prisma.TransactionClient, orderId: s
 
   const items = await tx.orderItem.findMany({
     where: { orderId },
-    include: { kit: { include: { items: true } } },
+    include: { components: true, kit: { include: { items: true } } },
   });
 
   // updateMany (et non update) : ne plante pas si un produit/une taille a disparu depuis
@@ -34,7 +35,11 @@ export async function releaseOrderStock(tx: Prisma.TransactionClient, orderId: s
   };
 
   for (const item of items) {
-    if (item.kit) {
+    if (item.components.length > 0) {
+      for (const component of item.components) {
+        await restock(component.productId, component.productSizeId, component.quantity * item.quantity);
+      }
+    } else if (item.kit) {
       for (const kitItem of item.kit.items) {
         await restock(kitItem.productId, kitItem.productSizeId, kitItem.quantity * item.quantity);
       }
