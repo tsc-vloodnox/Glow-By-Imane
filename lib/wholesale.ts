@@ -15,7 +15,16 @@ export const WHOLESALE_MIN_TOTAL_QUANTITY = 10;
 export const WHOLESALE_MAX_LINE_QUANTITY = 10_000;
 export const WHOLESALE_MAX_LINES = 60;
 
-export type WholesaleItemInput = { productId: string; productSizeId: string | null; quantity: number };
+export type WholesaleItemInput = {
+  productId: string;
+  productSizeId: string | null;
+  quantity: number;
+  /** Prix unitaire proposé par le revendeur (facultatif), en GNF */
+  requestedUnitPrice: number | null;
+};
+
+/** Plafond du prix souhaité : garde-fou contre les fautes de frappe. */
+export const WHOLESALE_MAX_REQUESTED_PRICE = 100_000_000;
 
 export type WholesaleInput = {
   name: string;
@@ -29,6 +38,15 @@ export type WholesaleInput = {
 function quantity(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > WHOLESALE_MAX_LINE_QUANTITY) {
     throw new UserError(`Quantité invalide (entre 1 et ${WHOLESALE_MAX_LINE_QUANTITY.toLocaleString("fr-FR")} par article).`);
+  }
+  return value;
+}
+
+/** Prix souhaité : vide → null ; sinon entier strictement positif. */
+function requestedUnitPrice(value: unknown): number | null {
+  if (value === undefined || value === null || value === "" || value === 0) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > WHOLESALE_MAX_REQUESTED_PRICE) {
+    throw new UserError("Prix souhaité invalide (nombre entier de GNF, sans décimale).");
   }
   return value;
 }
@@ -50,7 +68,14 @@ export function parseWholesaleInput(raw: unknown): WholesaleInput {
     const key = `${productId}:${productSizeId ?? ""}`;
     const existing = merged.get(key);
     const qty = quantity(item.quantity);
-    merged.set(key, { productId, productSizeId, quantity: quantity((existing?.quantity ?? 0) + qty) });
+    const requested = requestedUnitPrice(item.requestedUnitPrice);
+    merged.set(key, {
+      productId,
+      productSizeId,
+      quantity: quantity((existing?.quantity ?? 0) + qty),
+      // Lignes fusionnées : le dernier prix souhaité saisi l'emporte
+      requestedUnitPrice: requested ?? existing?.requestedUnitPrice ?? null,
+    });
   }
   const items = [...merged.values()];
 

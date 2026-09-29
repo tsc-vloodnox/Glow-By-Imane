@@ -65,7 +65,7 @@ Pouvez-vous confirmer la disponibilité et les frais de livraison ?`;
 type WholesaleMessageInput = {
   number: number;
   estimatedTotal: number;
-  lines: { label: string; quantity: number }[];
+  lines: { label: string; quantity: number; unitPrice: number; requestedUnitPrice?: number | null }[];
   name: string;
   phone: string;
   quartier: string;
@@ -75,7 +75,18 @@ type WholesaleMessageInput = {
 
 /** Message WhatsApp d'une demande revendeur (prix indicatif, à confirmer ensemble). */
 export function buildWholesaleMessage(request: WholesaleMessageInput): string {
-  const lines = request.lines.map((line) => `- ${line.label} x${line.quantity}`);
+  const gnf = (value: number) => value.toLocaleString("fr-GN");
+  const lines = request.lines.map((line) =>
+    line.requestedUnitPrice
+      ? `- ${line.label} x${line.quantity} — souhaité : ${gnf(line.requestedUnitPrice)} GNF/u (indicatif ${gnf(line.unitPrice)})`
+      : `- ${line.label} x${line.quantity}`,
+  );
+  const hasRequested = request.lines.some((line) => line.requestedUnitPrice);
+  // Total « souhaité » : prix proposé quand il existe, prix indicatif sinon
+  const requestedTotal = request.lines.reduce(
+    (sum, line) => sum + (line.requestedUnitPrice ?? line.unitPrice) * line.quantity,
+    0,
+  );
   const info = [
     `Nom : ${request.name}`,
     request.businessName ? `Boutique : ${request.businessName}` : null,
@@ -92,7 +103,8 @@ Demande revendeur #${request.number}
 
 ${lines.join("\n")}
 
-Total indicatif : ${request.estimatedTotal.toLocaleString("fr-GN")} GNF (prix à confirmer ensemble)
+Total indicatif : ${gnf(request.estimatedTotal)} GNF${hasRequested ? `
+Total selon mes prix souhaités : ${gnf(requestedTotal)} GNF` : ""} (à confirmer ensemble)
 
 Mes informations :
 ${info.join("\n")}

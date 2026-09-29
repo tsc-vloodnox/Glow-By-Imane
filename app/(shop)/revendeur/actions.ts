@@ -75,7 +75,8 @@ async function createWholesaleRequestImpl(raw: unknown) {
         productId: product.id,
         productSizeId: size ? size.id : null,
         quantity: item.quantity,
-        unitPrice: Math.round(lineTotal / item.quantity),
+        unitPrice: Math.round(lineTotal / item.quantity), // indicatif, ajusté par l'admin
+        requestedUnitPrice: item.requestedUnitPrice,
       },
     };
   });
@@ -117,7 +118,12 @@ async function createWholesaleRequestImpl(raw: unknown) {
   return buildWholesaleMessage({
     number: order.number,
     estimatedTotal,
-    lines: lines.map((line) => ({ label: line.label, quantity: line.data.quantity })),
+    lines: lines.map((line) => ({
+      label: line.label,
+      quantity: line.data.quantity,
+      unitPrice: line.data.unitPrice,
+      requestedUnitPrice: line.data.requestedUnitPrice,
+    })),
     name: data.name,
     phone: data.phone,
     quartier: data.quartier,
