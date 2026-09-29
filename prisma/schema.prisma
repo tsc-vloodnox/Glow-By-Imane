@@ -151,15 +151,22 @@ model KitItem {
   @@index([productId])
 }
 
+/// Fiche cliente, créée/mise à jour automatiquement à chaque commande.
+/// `phone` est normalisé au format international sans "+" (224XXXXXXXXX) : un même
+/// numéro saisi "620 00 00 00" ou "+224620000000" désigne la même cliente.
 model Customer {
-  id         String   @id @default(cuid())
-  phone      String   @unique
-  name       String
-  quartier   String
-  loyaltyPts Int      @default(0)
-  vip        Boolean  @default(false)
-  orders     Order[]
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  phone        String   @unique
+  name         String
+  quartier     String
+  businessName String? // nom de la boutique (revendeurs)
+  isReseller   Boolean  @default(false)
+  notes        String? // notes internes de l'admin
+  loyaltyPts   Int      @default(0) // règles de fidélité pas encore définies
+  vip          Boolean  @default(false)
+  orders       Order[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 model Order {

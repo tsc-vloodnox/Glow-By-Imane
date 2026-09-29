@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveDiscountedLineTotal, type ActivePromotion } from "@/lib/pricing";
 import { buildOrderMessage } from "@/lib/whatsapp";
 import { GIFT_PRINT_FEE } from "@/lib/gift-card";
+import { upsertCustomer } from "@/lib/customers";
 import { MAX_ORDER_LINES, parseOrderInput } from "@/lib/order-validation";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import type { CartItemInput, OrderInput } from "@/types/types";
@@ -181,9 +182,13 @@ async function createOrderImpl(rawData: OrderInput) {
       estimatedTotal += GIFT_PRINT_FEE;
     }
 
-    // 6. Création de la commande seulement si tout le stock a été réservé
+    // 6. Fiche cliente (créée ou mise à jour d'après le numéro)
+    const customerId = await upsertCustomer(tx, { phone: data.phone, name: data.name, quartier: data.quartier });
+
+    // 7. Création de la commande seulement si tout le stock a été réservé
     return tx.order.create({
       data: {
+        customerId,
         name: data.name,
         phone: data.phone,
         quartier: data.quartier,

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
+import { orderItemLabel } from "@/lib/order-items";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import { requireAdmin } from "../../actions";
 import { OrderStatusChanger } from "./OrderStatusChanger";
@@ -28,6 +29,7 @@ export default async function OrderDetailPage({ params }: Props) {
       items: {
         include: {
           product: { select: { id: true, name: true, images: true } },
+          productSize: { select: { label: true } },
           kit: { select: { id: true, name: true } },
         },
       },
@@ -40,6 +42,9 @@ export default async function OrderDetailPage({ params }: Props) {
   if (!order) notFound();
 
   const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
+  const customerOrderCount = order.customerId
+    ? await prisma.order.count({ where: { customerId: order.customerId } })
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -82,7 +87,7 @@ export default async function OrderDetailPage({ params }: Props) {
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-sand)] text-xs font-semibold text-[var(--color-accent)]">
                       {item.quantity}
                     </span>
-                    <span className="text-sm">{item.product?.name ?? "Produit supprimé"}</span>
+                    <span className="text-sm">{orderItemLabel(item)}</span>
                   </div>
                   <span className="shrink-0 text-sm font-medium">
                     {(item.unitPrice * item.quantity).toLocaleString("fr-GN")} GNF
@@ -192,20 +197,20 @@ export default async function OrderDetailPage({ params }: Props) {
           </section>
 
           {order.customer && (
-            <section className="rounded-xl border border-[var(--color-border)] bg-white p-4">
-              <h2 className="mb-3 font-medium">Profil client</h2>
-              <dl className="space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <dt className="text-[var(--color-muted)]">Points fidélité</dt>
-                  <dd className="font-semibold text-[var(--color-accent)]">{order.customer.loyaltyPts} pts</dd>
-                </div>
-                {order.customer.vip && (
-                  <dd className="rounded-full bg-[var(--color-blush)] px-3 py-1 text-center text-xs font-medium text-[var(--color-accent)]">
-                    ⭐ Cliente VIP
-                  </dd>
+            <Link
+              href={`/admin/clientes/${order.customer.id}`}
+              className="block rounded-xl border border-[var(--color-border)] bg-white p-4 hover:border-[var(--color-accent)]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="font-medium">Fiche cliente</h2>
+                {order.customer.isReseller && (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">Revendeur</span>
                 )}
-              </dl>
-            </section>
+              </div>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                {customerOrderCount} commande{customerOrderCount > 1 ? "s" : ""} au total · voir l&apos;historique →
+              </p>
+            </Link>
           )}
         </div>
       </div>

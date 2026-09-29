@@ -10,6 +10,7 @@ import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
 import { GIFT_LINK_EXPIRY_DAYS, giftCardUrl } from "@/lib/gift-card";
 import { releaseOrderStock } from "@/lib/stock";
+import { upsertCustomer } from "@/lib/customers";
 import { toInt, toJsonArray } from "@/lib/form-validation";
 import { UserError, withActionResult } from "@/lib/action-result";
 
@@ -137,8 +138,11 @@ async function createAdminOrderImpl(formData: FormData) {
       }
     }
 
+    const customerId = await upsertCustomer(tx, { phone, name, quartier });
+
     return tx.order.create({
       data: {
+        customerId,
         name,
         phone,
         quartier,

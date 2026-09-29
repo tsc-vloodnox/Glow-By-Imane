@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
+import { orderItemLabel } from "@/lib/order-items";
 import { requireAdmin } from "../actions";
 import { BulkDeleteOrders } from "./BulkDeleteOrders";
 
@@ -31,7 +32,11 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
     orderBy: { createdAt: "desc" },
     include: {
       items: {
-        include: { product: { select: { name: true } } },
+        include: {
+          product: { select: { name: true } },
+          productSize: { select: { label: true } },
+          kit: { select: { name: true } },
+        },
       },
       delivery: { select: { status: true, scheduledAt: true } },
       giftCard: { select: { id: true } },
@@ -107,7 +112,7 @@ export default async function AdminCommandesPage({ searchParams }: Props) {
             const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
             const itemSummary = order.items
               .slice(0, 2)
-              .map((i) => `${i.quantity}× ${i.product?.name ?? "Produit supprimé"}`)
+              .map((i) => `${i.quantity}× ${orderItemLabel(i)}`)
               .join(", ");
             const moreItems = order.items.length > 2 ? ` +${order.items.length - 2}` : "";
 
