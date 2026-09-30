@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ORDER_STATUS_CONFIG, type OrderStatus } from "@/lib/order-status";
 import { orderItemLabel } from "@/lib/order-items";
+import { formatFeeRange, haversineKm, mapsUrl } from "@/lib/delivery";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import { requireAdmin } from "../../actions";
 import { OrderStatusChanger } from "./OrderStatusChanger";
@@ -37,15 +38,34 @@ export default async function OrderDetailPage({ params }: Props) {
         },
       },
       customer: true,
-      delivery: true,
+      delivery: { include: { livreur: { select: { name: true } }, run: { select: { id: true, settledAt: true } } } },
+      quartierRef: { select: { name: true, lat: true, lng: true } },
+      pickupPoint: { select: { name: true, lat: true, lng: true } },
       giftCard: true,
     },
   });
 
   if (!order) notFound();
 
+  const livreurs = await prisma.livreur.findMany({
+    where: { OR: [{ active: true }, ...(order.delivery?.livreurId ? [{ id: order.delivery.livreurId }] : [])] },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+
   const statusCfg = ORDER_STATUS_CONFIG[order.status as OrderStatus];
   const isWholesale = order.kind === "GROS";
+  const isPickup = order.deliveryMode === "RETRAIT";
+  const announcedFee = formatFeeRange(order.deliveryFeeMin, order.deliveryFeeMax);
+  const sharedLocation =
+    order.locationLat != null && order.locationLng != null ? { lat: order.locationLat, lng: order.locationLng } : null;
+  const pickupCoords =
+    order.pickupPoint?.lat != null && order.pickupPoint.lng != null
+      ? { lat: order.pickupPoint.lat, lng: order.pickupPoint.lng }
+      : null;
+  // Distance depuis la boutique (vol d'oiseau) : position partagée, sinon centre du quartier
+  const destination = sharedLocation ?? (order.quartierRef ? { lat: order.quartierRef.lat, lng: order.quartierRef.lng } : null);
+  const distanceKm = pickupCoords && destination ? haversineKm(pickupCoords, destination) : null;
   const customerOrderCount = order.customerId
     ? await prisma.order.count({ where: { customerId: order.customerId } })
     : 0;
@@ -158,12 +178,17 @@ export default async function OrderDetailPage({ params }: Props) {
             orderPhone={order.phone}
             orderQuartier={order.quartier}
             orderFinalTotal={order.finalTotal}
+            suggestedFee={isPickup ? 0 : order.deliveryFeeMin}
+            isPickup={isPickup}
+            livreurs={livreurs}
             delivery={order.delivery ? {
               id: order.delivery.id,
               status: order.delivery.status,
               scheduledAt: order.delivery.scheduledAt,
               deliveredAt: order.delivery.deliveredAt,
-              livreur: order.delivery.livreurId ?? null,
+              livreurId: order.delivery.livreurId,
+              livreur: order.delivery.livreur?.name ?? null,
+              run: order.delivery.run ? { id: order.delivery.run.id, settled: order.delivery.run.settledAt != null } : null,
               deliveryFee: order.delivery.deliveryFee ?? 0,
               notes: order.delivery.notes,
             } : null}
@@ -236,9 +261,38 @@ export default async function OrderDetailPage({ params }: Props) {
                 </dd>
               </div>
               <div>
-                <dt className="text-[var(--color-muted)]">Quartier</dt>
-                <dd>{order.quartier}</dd>
+                <dt className="text-[var(--color-muted)]">{isPickup ? "Mode" : "Quartier"}</dt>
+                <dd>
+                  {isPickup ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">🏬 {order.quartier}</span>
+                  ) : (
+                    order.quartier
+                  )}
+                </dd>
               </div>
+              {!isPickup && (
+                <div>
+                  <dt className="text-[var(--color-muted)]">Frais annoncés à la cliente</dt>
+                  <dd>{announcedFee ?? "À confirmer"}</dd>
+                </div>
+              )}
+              {!isPickup && (sharedLocation || distanceKm != null) && (
+                <div>
+                  <dt className="text-[var(--color-muted)]">Position</dt>
+                  <dd className="space-y-0.5">
+                    {sharedLocation ? (
+                      <a href={mapsUrl(sharedLocation)} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] hover:underline">
+                        📍 Position partagée — ouvrir dans Maps
+                      </a>
+                    ) : (
+                      <span className="text-[var(--color-muted)]">Non partagée (centre du quartier)</span>
+                    )}
+                    {distanceKm != null && (
+                      <span className="block text-xs text-[var(--color-muted)]">≈ {distanceKm.toFixed(1)} km de la boutique à vol d&apos;oiseau</span>
+                    )}
+                  </dd>
+                </div>
+              )}
               {order.comment && (
                 <div>
                   <dt className="text-[var(--color-muted)]">Commentaire</dt>

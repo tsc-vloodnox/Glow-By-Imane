@@ -5,6 +5,7 @@
 
 import type { CartItemInput, GiftInput, OrderInput } from "@/types/types";
 import { UserError } from "@/lib/action-result";
+import { isInGuinea } from "@/lib/delivery";
 
 /** Numéro guinéen : 6XXXXXXXX, avec ou sans indicatif 224 / +224 (espaces retirés avant test). */
 export const GUINEA_PHONE_PATTERN = /^(\+?224)?6\d{8}$/;
@@ -90,6 +91,19 @@ function parseGift(raw: unknown): GiftInput | undefined {
   };
 }
 
+/** Position partagée : facultative, et forcément en Guinée (garde-fou contre les valeurs fantaisistes). */
+function parseLocation(raw: unknown): { lat: number; lng: number } | null {
+  if (raw === undefined || raw === null) return null;
+  const loc = raw as Record<string, unknown>;
+  const lat = loc.lat;
+  const lng = loc.lng;
+  if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    fail("Position invalide.");
+  }
+  if (!isInGuinea({ lat, lng })) fail("Position hors de la zone de livraison.");
+  return { lat: Math.round(lat * 1e5) / 1e5, lng: Math.round(lng * 1e5) / 1e5 };
+}
+
 /** Valide et normalise une commande entrante. Lève une Error au message affichable sinon. */
 export function parseOrderInput(raw: unknown): OrderInput {
   if (typeof raw !== "object" || raw === null) fail("Commande invalide.");
@@ -98,12 +112,24 @@ export function parseOrderInput(raw: unknown): OrderInput {
   if (!Array.isArray(data.items) || data.items.length === 0) fail("Le panier est vide.");
   if (data.items.length > MAX_ORDER_LINES) fail(`Trop d'articles (${MAX_ORDER_LINES} lignes maximum).`);
 
+  const deliveryMode = data.deliveryMode === "RETRAIT" ? "RETRAIT" : "LIVRAISON";
+  const quartierId = deliveryMode === "LIVRAISON" && data.quartierId != null && data.quartierId !== "" ? id(data.quartierId) : null;
+
   return {
     name: requiredString(data.name, "Nom", 80),
     phone: phone(data.phone, "Téléphone"),
-    quartier: requiredString(data.quartier, "Quartier", 120),
+    // Retrait : pas d'adresse. Quartier de la liste : précisions facultatives. Sinon quartier obligatoire.
+    quartier:
+      deliveryMode === "RETRAIT"
+        ? ""
+        : quartierId
+          ? optionalString(data.quartier, "Précisions", 120) ?? ""
+          : requiredString(data.quartier, "Quartier", 120),
     comment: optionalString(data.comment, "Commentaire", 500),
     items: data.items.map(parseItem),
     gift: parseGift(data.gift),
+    deliveryMode,
+    quartierId,
+    location: deliveryMode === "LIVRAISON" ? parseLocation(data.location) : null,
   };
 }

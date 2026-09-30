@@ -64,3 +64,33 @@ describe("parseOrderInput", () => {
     });
   });
 });
+
+describe("livraison", () => {
+  const baseOrder = { name: "Awa", phone: "620000000", items: [{ kind: "product", productId: "p1", quantity: 1 }] };
+
+  it("quartier de la liste : précisions facultatives", () => {
+    const parsed = parseOrderInput({ ...baseOrder, deliveryMode: "LIVRAISON", quartierId: "q_kipe", quartier: "" });
+    expect(parsed).toMatchObject({ deliveryMode: "LIVRAISON", quartierId: "q_kipe", quartier: "" });
+  });
+
+  it("autre quartier : saisie obligatoire", () => {
+    expect(() => parseOrderInput({ ...baseOrder, deliveryMode: "LIVRAISON", quartier: " " })).toThrow(/Quartier requis/);
+    expect(parseOrderInput({ ...baseOrder, deliveryMode: "LIVRAISON", quartier: "Simbaya" }).quartier).toBe("Simbaya");
+  });
+
+  it("retrait : ni quartier ni position", () => {
+    const parsed = parseOrderInput({ ...baseOrder, deliveryMode: "RETRAIT", quartierId: "q_kipe", location: { lat: 9.6, lng: -13.6 } });
+    expect(parsed).toMatchObject({ deliveryMode: "RETRAIT", quartierId: null, quartier: "", location: null });
+  });
+
+  it("mode absent : livraison par défaut", () => {
+    expect(parseOrderInput({ ...baseOrder, quartier: "Kaloum" }).deliveryMode).toBe("LIVRAISON");
+  });
+
+  it("position : acceptée en Guinée (arrondie), refusée ailleurs ou invalide", () => {
+    const ok = parseOrderInput({ ...baseOrder, quartier: "Kipé", location: { lat: 9.6041234, lng: -13.6561234 } });
+    expect(ok.location).toEqual({ lat: 9.60412, lng: -13.65612 });
+    expect(() => parseOrderInput({ ...baseOrder, quartier: "Kipé", location: { lat: 48.85, lng: 2.35 } })).toThrow(/hors de la zone/);
+    expect(() => parseOrderInput({ ...baseOrder, quartier: "Kipé", location: { lat: "9.6", lng: -13.6 } })).toThrow(/Position invalide/);
+  });
+});

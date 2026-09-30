@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import type { Prisma } from "@prisma/client";
 
+import { recomputeRun } from "@/lib/delivery-runs";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_COOKIE_NAME, isSignedTokenValid } from "@/lib/admin-auth";
 import { UserError, withActionResult } from "@/lib/action-result";
@@ -451,32 +452,67 @@ async function deleteKitImpl(kitId: string) {
 
 // ─── Livraisons ───────────────────────────────────────────────────────────────
 
+/** Livreur choisi dans un formulaire : vide = non attribué ; sinon doit exister. */
+async function livreurFromForm(formData: FormData): Promise<string | null> {
+  const livreurId = String(formData.get("livreurId") ?? "").trim();
+  if (!livreurId) return null;
+  const livreur = await prisma.livreur.findUnique({ where: { id: livreurId }, select: { id: true } });
+  if (!livreur) throw new UserError("Livreur introuvable : rechargez la page.");
+  return livreurId;
+}
+
+/**
+ * Une livraison qui change de livreur quitte sa tournée (recalculée ensuite).
+ * Refusé si la tournée est déjà réglée. Renvoie les tournées à recalculer.
+ */
+async function detachFromOtherRuns(deliveryIds: string[], livreurId: string | null): Promise<string[]> {
+  const leaving = await prisma.delivery.findMany({
+    where: { id: { in: deliveryIds }, runId: { not: null }, run: { livreurId: { not: livreurId ?? "" } } },
+    select: { id: true, runId: true, run: { select: { settledAt: true } } },
+  });
+  if (leaving.some((d) => d.run?.settledAt)) {
+    throw new UserError("Une des livraisons appartient à une tournée déjà réglée : son livreur ne peut plus changer.");
+  }
+  if (leaving.length > 0) {
+    await prisma.delivery.updateMany({ where: { id: { in: leaving.map((d) => d.id) } }, data: { runId: null } });
+  }
+  return [...new Set(leaving.map((d) => d.runId!))];
+}
+
+function revalidateDeliveryViews(orderId?: string) {
+  revalidatePath("/admin/livraisons");
+  revalidatePath("/admin/livraisons/tournees");
+  revalidatePath("/admin/commandes");
+  if (orderId) revalidatePath(`/admin/commandes/${orderId}`);
+}
+
 async function createDeliveryImpl(formData: FormData) {
   await requireAdmin();
 
   const orderId = String(formData.get("orderId") ?? "").trim();
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
-  const livreurId = String(formData.get("livreurId") ?? "").trim() || null;
-  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim().slice(0, 500) || null;
   const deliveryFee = toInt(formData.get("deliveryFee"), "Frais de livraison", { optional: true });
 
   if (!orderId || !scheduledAt) {
     throw new UserError("Commande et date de livraison requises.");
   }
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true, delivery: { select: { id: true } } } });
+  if (!order) throw new UserError("Commande introuvable.");
+  if (order.status === "ANNULEE") throw new UserError("Cette commande est annulée.");
+  if (order.delivery) throw new UserError("Une livraison est déjà planifiée pour cette commande.");
 
   await prisma.delivery.create({
     data: {
       orderId,
       scheduledAt: toDate(scheduledAt, "Date de livraison"),
-      livreurId,
+      livreurId: await livreurFromForm(formData),
       notes,
       deliveryFee,
     },
   });
 
-  revalidatePath("/admin/livraisons");
-  revalidatePath("/admin/commandes");
-  revalidatePath(`/admin/commandes/${orderId}`);
+  revalidateDeliveryViews(orderId);
 }
 
 async function updateDeliveryStatusImpl(
@@ -519,28 +555,66 @@ async function updateDeliveryStatusImpl(
     return updated;
   });
 
-  revalidatePath("/admin/livraisons");
-  revalidatePath("/admin/commandes");
-  revalidatePath(`/admin/commandes/${delivery.orderId}`);
+  revalidateDeliveryViews(delivery.orderId);
 }
 
+/**
+ * Planifie d'un coup plusieurs commandes à livrer (vue Livraisons) : même date,
+ * livreur facultatif, frais = bas de la fourchette annoncée à chaque cliente (modifiable ensuite).
+ */
+async function planDeliveriesImpl(orderIds: string[], scheduledAt: string, livreurId: string | null) {
+  await requireAdmin();
+  if (!Array.isArray(orderIds) || orderIds.length === 0) throw new UserError("Sélectionnez au moins une commande.");
+  if (orderIds.length > 100) throw new UserError("Trop de commandes à la fois (100 maximum).");
+  const date = toDate(scheduledAt, "Date de livraison");
+  if (livreurId && !(await prisma.livreur.findUnique({ where: { id: livreurId }, select: { id: true } }))) {
+    throw new UserError("Livreur introuvable : rechargez la page.");
+  }
+
+  const orders = await prisma.order.findMany({
+    where: { id: { in: orderIds }, status: { not: "ANNULEE" }, delivery: null },
+    select: { id: true, deliveryMode: true, deliveryFeeMin: true },
+  });
+  await prisma.delivery.createMany({
+    data: orders.map((o) => ({
+      orderId: o.id,
+      scheduledAt: date,
+      livreurId,
+      deliveryFee: o.deliveryMode === "RETRAIT" ? 0 : (o.deliveryFeeMin ?? 0),
+    })),
+    skipDuplicates: true,
+  });
+
+  revalidateDeliveryViews();
+  return { planned: orders.length };
+}
+
+/** Modifie date, livreur, frais et note d'une livraison (fiche commande). */
 async function updateDeliveryImpl(deliveryId: string, formData: FormData) {
   await requireAdmin();
 
   const scheduledAt = String(formData.get("scheduledAt") ?? "").trim();
-  const livreurId = String(formData.get("livreurId") ?? "").trim() || null;
-  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim().slice(0, 500) || null;
+  const deliveryFee = toInt(formData.get("deliveryFee"), "Frais de livraison", { optional: true });
+  const livreurId = await livreurFromForm(formData);
 
-  await prisma.delivery.update({
+  const current = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { run: { select: { settledAt: true } } } });
+  if (!current) throw new UserError("Livraison introuvable.");
+  if (current.run?.settledAt) throw new UserError("Cette livraison fait partie d'une tournée réglée : elle ne peut plus être modifiée.");
+
+  const runsToRecompute = await detachFromOtherRuns([deliveryId], livreurId);
+  const delivery = await prisma.delivery.update({
     where: { id: deliveryId },
     data: {
       scheduledAt: scheduledAt ? toDate(scheduledAt, "Date de livraison") : undefined,
       livreurId,
       notes,
+      deliveryFee,
     },
   });
+  for (const runId of runsToRecompute) await recomputeRun(prisma, runId);
 
-  revalidatePath("/admin/livraisons");
+  revalidateDeliveryViews(delivery.orderId);
 }
 
 // ─── Livreurs ───────────────────────────────────────────────────────────────
@@ -552,14 +626,16 @@ async function updateDeliveryImpl(deliveryId: string, formData: FormData) {
 async function assignLivreurImpl(deliveryIds: string[], livreurId: string | null) {
   await requireAdmin();
 
-  if (deliveryIds.length === 0) return;
+  if (!Array.isArray(deliveryIds) || deliveryIds.length === 0) return;
+  if (livreurId && !(await prisma.livreur.findUnique({ where: { id: livreurId }, select: { id: true } }))) {
+    throw new UserError("Livreur introuvable : rechargez la page.");
+  }
 
-  await prisma.delivery.updateMany({
-    where: { id: { in: deliveryIds } },
-    data: { livreurId },
-  });
+  const runsToRecompute = await detachFromOtherRuns(deliveryIds, livreurId);
+  await prisma.delivery.updateMany({ where: { id: { in: deliveryIds } }, data: { livreurId } });
+  for (const runId of runsToRecompute) await recomputeRun(prisma, runId);
 
-  revalidatePath("/admin/livraisons");
+  revalidateDeliveryViews();
 }
 
 /**
@@ -622,15 +698,15 @@ async function updateDeliveryFeeImpl(deliveryId: string, deliveryFee: number) {
   await requireAdmin();
 
   const fee = toInt(deliveryFee, "Frais de livraison");
+  const current = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { run: { select: { settledAt: true } } } });
+  if (current?.run?.settledAt) throw new UserError("Tournée déjà réglée : les frais ne peuvent plus changer.");
 
   const delivery = await prisma.delivery.update({
     where: { id: deliveryId },
     data: { deliveryFee: fee },
   });
 
-  revalidatePath("/admin/livraisons");
-  revalidatePath("/admin/commandes");
-  revalidatePath(`/admin/commandes/${delivery.orderId}`);
+  revalidateDeliveryViews(delivery.orderId);
 }
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
@@ -651,6 +727,7 @@ export const deleteKit = withActionResult(deleteKitImpl);
 export const createDelivery = withActionResult(createDeliveryImpl);
 export const updateDeliveryStatus = withActionResult(updateDeliveryStatusImpl);
 export const updateDelivery = withActionResult(updateDeliveryImpl);
+export const planDeliveries = withActionResult(planDeliveriesImpl);
 export const assignLivreur = withActionResult(assignLivreurImpl);
 export const createLivreur = withActionResult(createLivreurImpl);
 export const updateLivreur = withActionResult(updateLivreurImpl);
