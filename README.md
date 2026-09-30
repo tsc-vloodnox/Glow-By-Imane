@@ -1,5 +1,6 @@
 # Glow by Imane 🌸
 
+
 Application e-commerce de beauté et accessoires ciblant le marché guinéen, avec un panneau d'administration complet. Les prix sont exprimés en **GNF (Franc Guinéen)**.
 
 > **Philosophie** : le site n'est pas une boutique automatisée. Il agit comme un assistant de vente numérique — découverte des produits, prise de commande simplifiée, confirmation et suivi via WhatsApp. La technologie renforce la relation humaine, elle ne la remplace pas.
