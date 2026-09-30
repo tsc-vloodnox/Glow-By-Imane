@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { recomputeRun } from "@/lib/delivery-runs";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "../actions";
 import { ORDER_STATUS_CONFIG } from "@/lib/order-status";
@@ -261,6 +262,7 @@ async function deleteAllOrdersImpl(statusFilter?: OrderStatusValue) {
   await requireAdmin();
 
   const where = statusFilter ? { status: statusFilter } : {};
+  const runsToRecompute: string[] = [];
 
   await prisma.$transaction(
     async (tx) => {
@@ -274,17 +276,36 @@ async function deleteAllOrdersImpl(statusFilter?: OrderStatusValue) {
         await releaseOrderStock(tx, id);
       }
 
+      // Tournées touchées : noter lesquelles avant de supprimer leurs livraisons
+      const touchedRuns = await tx.delivery.findMany({
+        where: { order: where, runId: { not: null } },
+        select: { runId: true },
+        distinct: ["runId"],
+      });
+
       // Supprime d'abord les livraisons, cartes cadeau et items liés (contraintes FK)
       await tx.delivery.deleteMany({ where: { order: where } });
+
+      // Une tournée qui n'a plus aucun arrêt n'a plus de sens (même réglée) : supprimée.
+      // Les autres non réglées sont recalculées après la transaction ; une tournée réglée garde son montant.
+      for (const { runId } of touchedRuns) {
+        const remaining = await tx.delivery.count({ where: { runId } });
+        if (remaining === 0) await tx.deliveryRun.delete({ where: { id: runId! } });
+        else runsToRecompute.push(runId!);
+      }
+
       await tx.giftCard.deleteMany({ where: { order: where } });
       await tx.orderItem.deleteMany({ where: { order: where } });
       await tx.order.deleteMany({ where });
     },
     { timeout: 30_000 },
   );
+  for (const runId of runsToRecompute) await recomputeRun(prisma, runId);
 
   revalidatePath("/admin/commandes");
   revalidatePath("/admin/livraisons");
+  revalidatePath("/admin/livraisons/tournees");
+  revalidatePath("/admin/clientes");
   revalidatePath("/", "layout"); // stock visible en boutique
 }
 

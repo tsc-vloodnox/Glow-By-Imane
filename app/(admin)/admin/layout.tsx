@@ -7,7 +7,7 @@ import Link from "next/link";
 import { AdminMobileNav } from "./_components/AdminMobileNav";
 import { LogoutButton } from "./_components/LogoutButton";
 
-const navItems = [
+const navItems: { href: string; label: string; sub?: boolean }[] = [
   { href: "/admin/dashboard", label: "Dashboard" },
   { href: "/admin/commandes", label: "Commandes" },
   { href: "/admin/clientes", label: "Clientes" },
@@ -15,6 +15,8 @@ const navItems = [
   { href: "/admin/categories", label: "Catégories" },
   { href: "/admin/promotions", label: "Promotions" },
   { href: "/admin/livraisons", label: "Livraisons" },
+  { href: "/admin/livraisons/tournees", label: "Tournées", sub: true },
+  { href: "/admin/livraisons/reglages", label: "Zones & tarifs", sub: true },
   { href: "/admin/livreurs", label: "Livreurs" },
   { href: "/admin/kits", label: "Kits" },
 ];
@@ -34,7 +36,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Link
                 key={item.href}
                 href={item.href}
-                className="block rounded-lg px-3 py-2 text-sm hover:bg-[var(--color-blush)]"
+                className={`block rounded-lg px-3 py-2 text-sm hover:bg-[var(--color-blush)] ${
+                  item.sub ? "-mt-1 ml-3 border-l border-[var(--color-border)] py-1.5 text-[var(--color-muted)]" : ""
+                }`}
               >
                 {item.label}
               </Link>
